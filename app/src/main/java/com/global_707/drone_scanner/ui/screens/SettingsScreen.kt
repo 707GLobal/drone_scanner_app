@@ -16,10 +16,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.DisplaySettings
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -74,7 +74,7 @@ fun SettingsScreen(
                     onClick = onSearchSettings,
                 )
                 SettingRow(
-                    icon = Icons.Filled.DisplaySettings,
+                    icon = Icons.Filled.Settings,
                     label = stringResource(R.string.display_settings),
                     onClick = onDisplaySettings,
                     showDivider = false,
@@ -149,7 +149,7 @@ private fun SettingRow(
                 modifier = Modifier.weight(1f),
             )
             Icon(
-                imageVector = Icons.Filled.ChevronRight,
+                imageVector = Icons.Filled.KeyboardArrowRight,
                 contentDescription = null,
                 tint = colors.mutedForeground,
                 modifier = Modifier.size(16.dp),

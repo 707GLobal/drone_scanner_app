@@ -18,11 +18,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -54,6 +51,7 @@ import com.global_707.drone_scanner.data.ScanPriority
 import com.global_707.drone_scanner.data.ScannerController
 import com.global_707.drone_scanner.ui.components.RadarGlyph
 import com.global_707.drone_scanner.ui.components.SectionCard
+import com.global_707.drone_scanner.ui.theme.AppIcons
 import com.global_707.drone_scanner.ui.theme.DroneTypography
 import com.global_707.drone_scanner.ui.theme.LocalDroneColors
 import kotlinx.coroutines.delay
@@ -104,7 +102,7 @@ fun SearchSettingsScreen(onBack: () -> Unit) {
             Spacer(Modifier.height(12.dp))
             SectionCard {
                 FeatureRow(
-                    icon = Icons.Filled.Bluetooth,
+                    icon = AppIcons.Bluetooth,
                     label = stringResource(R.string.scan_bluetooth),
                     checked = AppPrefs.bluetoothScanEnabled,
                     onCheckedChange = { value ->
@@ -161,7 +159,7 @@ fun SearchSettingsScreen(onBack: () -> Unit) {
             Spacer(Modifier.height(12.dp))
             SectionCard {
                 FeatureRow(
-                    icon = Icons.Filled.Wifi,
+                    icon = AppIcons.Wifi,
                     label = stringResource(R.string.scan_wifi),
                     checked = AppPrefs.wifiScanEnabled,
                     onCheckedChange = { value ->
@@ -245,17 +243,28 @@ private fun FeatureRow(
     }
 }
 
-/** 能力状态行：✓ / ✗ 图标 + 标题 + 说明（实时检测结果） */
+/** 能力状态行：✓ / ✗ 圆形图标（样式统一）+ 标题 + 说明（实时检测结果） */
 @Composable
 private fun CapabilityStatusRow(supported: Boolean, title: String, description: String) {
     val colors = LocalDroneColors.current
     Row {
-        Icon(
-            imageVector = if (supported) Icons.Filled.CheckCircle else Icons.Filled.Close,
-            contentDescription = null,
-            tint = if (supported) colors.success else colors.danger,
-            modifier = Modifier.size(22.dp),
-        )
+        // 统一样式：浅色圆底 + 同系列实心圆形图标（CheckCircle / Cancel）
+        Box(
+            Modifier
+                .size(24.dp)
+                .clip(RoundedCornerShape(50))
+                .background(
+                    (if (supported) colors.success else colors.danger).copy(alpha = 0.15f),
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = if (supported) Icons.Filled.CheckCircle else AppIcons.Cancel,
+                contentDescription = null,
+                tint = if (supported) colors.success else colors.danger,
+                modifier = Modifier.size(16.dp),
+            )
+        }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(
@@ -482,7 +491,7 @@ fun AboutScreen(onBack: () -> Unit) {
                         modifier = Modifier.weight(1f),
                     )
                     Icon(
-                        imageVector = Icons.Filled.ChevronRight,
+                        imageVector = Icons.Filled.KeyboardArrowRight,
                         contentDescription = null,
                         tint = colors.mutedForeground,
                         modifier = Modifier.size(16.dp),

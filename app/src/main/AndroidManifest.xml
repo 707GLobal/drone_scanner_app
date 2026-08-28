@@ -27,6 +27,7 @@
     <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />
 
     <application
+        android:name=".DroneScannerApp"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
@@ -36,10 +37,10 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Drone_scanner">
 
-        <!-- 高德地图 API Key（由 gradle manifestPlaceholders 注入） -->
+        <!-- 腾讯位置服务地图 Key（由 gradle manifestPlaceholders 注入） -->
         <meta-data
-            android:name="com.amap.api.v2.apikey"
-            android:value="${AMAP_API_KEY}" />
+            android:name="TencentMapSDK"
+            android:value="${TENCENT_MAP_KEY}" />
 
         <activity
             android:name=".MainActivity"

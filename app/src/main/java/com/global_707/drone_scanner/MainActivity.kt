@@ -39,7 +39,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             DroneScannerTheme {
-                DroneScannerApp()
+                DroneScannerRoot()
             }
         }
     }
@@ -62,7 +62,7 @@ private val routeOrder = listOf(
  * 设置 → 搜索设置 / 显示设置 / 关于我们
  */
 @Composable
-private fun DroneScannerApp() {
+private fun DroneScannerRoot() {
     var route by rememberSaveable { mutableStateOf("map") }
     var navDirection by rememberSaveable { mutableIntStateOf(1) }
     var selectedDroneId by rememberSaveable { mutableStateOf<String?>(null) }

@@ -3,6 +3,7 @@ package com.global_707.drone_scanner.ui.screens
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,8 +22,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Fullscreen
-import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -37,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -45,10 +45,11 @@ import com.global_707.drone_scanner.R
 import com.global_707.drone_scanner.data.AppPrefs
 import com.global_707.drone_scanner.data.Drone
 import com.global_707.drone_scanner.data.ScannerController
-import com.global_707.drone_scanner.ui.components.PulseDot
 import com.global_707.drone_scanner.ui.map.DroneMap
+import com.global_707.drone_scanner.ui.map.LocateTarget
 import com.global_707.drone_scanner.ui.map.MapBackendProvider
 import com.global_707.drone_scanner.ui.map.MapControls
+import com.global_707.drone_scanner.ui.theme.AppIcons
 import com.global_707.drone_scanner.ui.theme.DroneTypography
 import com.global_707.drone_scanner.ui.theme.LocalDroneColors
 import com.global_707.drone_scanner.util.NavigationLauncher
@@ -101,6 +102,9 @@ fun DroneDetailScreen(
     val context = LocalContext.current
     val pendingFeatureHint = stringResource(R.string.map_feature_pending)
     val operatorLabel = stringResource(R.string.operator_label)
+    val locateDevice = stringResource(R.string.locate_to_device)
+    val locateDrone = stringResource(R.string.locate_to_drone)
+    val locateOperator = stringResource(R.string.locate_to_operator)
 
     Column(
         Modifier
@@ -125,15 +129,39 @@ fun DroneDetailScreen(
                 modifier = Modifier.fillMaxSize(),
             )
 
-            // 地图悬浮控件（左上角）
+            // 地图悬浮控件（左上角）：定位按钮弹出菜单（设备/无人机/遥控站，图标按钮 + 动画）
             MapControls(
                 satellite = AppPrefs.satelliteMap,
+                locateTargets = listOfNotNull(
+                    LocateTarget(
+                        icon = AppIcons.Phone,
+                        contentDescription = locateDevice,
+                        onClick = {
+                            if (!MapBackendProvider.backend.locateMe(context)) {
+                                Toast.makeText(context, pendingFeatureHint, Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                    ),
+                    drone.droneLat?.let { lat ->
+                        drone.droneLng?.let { lng ->
+                            LocateTarget(
+                                icon = AppIcons.Flight,
+                                contentDescription = locateDrone,
+                                onClick = { MapBackendProvider.backend.moveTo(lat, lng) },
+                            )
+                        }
+                    },
+                    drone.operatorLat?.let { lat ->
+                        drone.operatorLng?.let { lng ->
+                            LocateTarget(
+                                icon = AppIcons.Gamepad,
+                                contentDescription = locateOperator,
+                                onClick = { MapBackendProvider.backend.moveTo(lat, lng) },
+                            )
+                        }
+                    },
+                ),
                 onToggleSatellite = { AppPrefs.saveSatelliteMap(!AppPrefs.satelliteMap) },
-                onLocateMe = {
-                    if (!MapBackendProvider.backend.locateMe(context)) {
-                        Toast.makeText(context, pendingFeatureHint, Toast.LENGTH_SHORT).show()
-                    }
-                },
                 onResetNorth = {
                     if (!MapBackendProvider.backend.resetNorth(context)) {
                         Toast.makeText(context, pendingFeatureHint, Toast.LENGTH_SHORT).show()
@@ -146,7 +174,7 @@ fun DroneDetailScreen(
 
             // 全屏查看按钮（右上角）
             MapOverlayButton(
-                icon = Icons.Filled.Fullscreen,
+                icon = AppIcons.Fullscreen,
                 label = stringResource(R.string.map_enter_fullscreen),
                 onClick = onEnterFullscreen,
                 modifier = Modifier
@@ -237,8 +265,7 @@ fun DroneDetailScreen(
 
 /** 地图上方小型覆盖按钮 */
 @Composable
-private fun MapOverlayButton(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    val colors = LocalDroneColors.current
+private fun MapOverlayButton(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {    val colors = LocalDroneColors.current
     Row(
         modifier = modifier
             .clip(RoundedCornerShape(50))
@@ -278,7 +305,7 @@ private fun NavigationButton(label: String, enabled: Boolean, onClick: () -> Uni
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
-            imageVector = Icons.Filled.Navigation,
+            imageVector = AppIcons.Navigation,
             contentDescription = null,
             tint = if (enabled) colors.primaryForeground else colors.mutedForeground,
             modifier = Modifier.size(16.dp),
@@ -375,6 +402,9 @@ fun FullscreenMapScreen(
     val colors = LocalDroneColors.current
     val context = LocalContext.current
     val pendingFeatureHint = stringResource(R.string.map_feature_pending)
+    val locateDevice = stringResource(R.string.locate_to_device)
+    val locateDrone = stringResource(R.string.locate_to_drone)
+    val locateOperator = stringResource(R.string.locate_to_operator)
 
     Column(
         Modifier
@@ -413,20 +443,45 @@ fun FullscreenMapScreen(
             )
             MapControls(
                 satellite = AppPrefs.satelliteMap,
+                locateTargets = listOfNotNull(
+                    LocateTarget(
+                        icon = AppIcons.Phone,
+                        contentDescription = locateDevice,
+                        onClick = {
+                            if (!MapBackendProvider.backend.locateMe(context)) {
+                                Toast.makeText(context, pendingFeatureHint, Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                    ),
+                    drone.droneLat?.let { lat ->
+                        drone.droneLng?.let { lng ->
+                            LocateTarget(
+                                icon = AppIcons.Flight,
+                                contentDescription = locateDrone,
+                                onClick = { MapBackendProvider.backend.moveTo(lat, lng) },
+                            )
+                        }
+                    },
+                    drone.operatorLat?.let { lat ->
+                        drone.operatorLng?.let { lng ->
+                            LocateTarget(
+                                icon = AppIcons.Gamepad,
+                                contentDescription = locateOperator,
+                                onClick = { MapBackendProvider.backend.moveTo(lat, lng) },
+                            )
+                        }
+                    },
+                ),
                 onToggleSatellite = { AppPrefs.saveSatelliteMap(!AppPrefs.satelliteMap) },
-                onLocateMe = {
-                    if (!MapBackendProvider.backend.locateMe(context)) {
-                        Toast.makeText(context, pendingFeatureHint, Toast.LENGTH_SHORT).show()
-                    }
-                },
                 onResetNorth = {
                     if (!MapBackendProvider.backend.resetNorth(context)) {
                         Toast.makeText(context, pendingFeatureHint, Toast.LENGTH_SHORT).show()
                     }
                 },
+                // 全屏页：控件置于左上角，定位菜单在右侧展开（不超出屏幕）
                 modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(end = 16.dp, top = 16.dp),
+                    .align(Alignment.TopStart)
+                    .padding(start = 16.dp, top = 16.dp),
             )
         }
     }

@@ -2,7 +2,6 @@ package com.global_707.drone_scanner.ui.components
 
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -10,21 +9,16 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Icon
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -32,13 +26,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.global_707.drone_scanner.ui.theme.DroneTypography
 import com.global_707.drone_scanner.ui.theme.LocalDroneColors
 import kotlin.math.cos
 import kotlin.math.sin
@@ -151,29 +142,6 @@ fun ScanningSpinner(modifier: Modifier = Modifier, size: Dp = 14.dp) {
     }
 }
 
-/** 信号强度柱：4 根，高度依次 4/8/12/16dp（参考设计文档第 5.5 节） */
-@Composable
-fun SignalBars(level: Int, color: Color, modifier: Modifier = Modifier) {
-    val heights = listOf(4.dp, 8.dp, 12.dp, 16.dp)
-    Row(
-        modifier = modifier,
-        verticalAlignment = Alignment.Bottom,
-        horizontalArrangement = Arrangement.spacedBy(3.dp),
-    ) {
-        heights.forEachIndexed { index, h ->
-            Box(
-                Modifier
-                    .width(4.dp)
-                    .height(h)
-                    .background(
-                        color = if (index < level) color else color.copy(alpha = 0.25f),
-                        shape = RoundedCornerShape(2.dp),
-                    ),
-            )
-        }
-    }
-}
-
 /** 雷达图标：中心圆点 + 8 条放射线（设置页 App 图标） */
 @Composable
 fun RadarGlyph(color: Color, modifier: Modifier = Modifier) {
@@ -190,31 +158,6 @@ fun RadarGlyph(color: Color, modifier: Modifier = Modifier) {
                 y = cy + lineLength * sin(angle).toFloat(),
             )
             drawLine(color, Offset(cx, cy), end, strokeWidth = 1.5.dp.toPx(), cap = StrokeCap.Round)
-        }
-    }
-}
-
-/** 网格地图占位背景 */
-@Composable
-fun MapGridBackground(
-    gridColor: Color,
-    backgroundColor: Color,
-    modifier: Modifier = Modifier,
-    cellSize: Dp = 50.dp,
-) {
-    androidx.compose.foundation.Canvas(modifier) {
-        drawRect(backgroundColor)
-        val step = cellSize.toPx()
-        val lineColor = gridColor.copy(alpha = 0.3f)
-        var x = 0f
-        while (x <= size.width) {
-            drawLine(lineColor, Offset(x, 0f), Offset(x, size.height), 1.dp.toPx())
-            x += step
-        }
-        var y = 0f
-        while (y <= size.height) {
-            drawLine(lineColor, Offset(0f, y), Offset(size.width, y), 1.dp.toPx())
-            y += step
         }
     }
 }
@@ -239,34 +182,4 @@ fun SectionCard(
             .padding(16.dp),
         content = content,
     )
-}
-
-/** 图标 + 文字行（扫描状态面板行），尾部可放 spinner */
-@Composable
-fun IconLabelRow(
-    icon: ImageVector,
-    text: String,
-    modifier: Modifier = Modifier,
-    trailing: @Composable RowScope.() -> Unit = {},
-) {
-    val colors = LocalDroneColors.current
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = colors.foreground,
-            modifier = Modifier.size(16.dp),
-        )
-        Text(
-            text = text,
-            style = DroneTypography.captionMedium,
-            color = colors.foreground,
-            modifier = Modifier.weight(1f),
-        )
-        trailing()
-    }
 }

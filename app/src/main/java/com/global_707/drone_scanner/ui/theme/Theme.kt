@@ -25,6 +25,14 @@ private val LightColorScheme = lightColorScheme(
     onError = Color.White,
     secondary = LightDroneColors.success,
     tertiary = LightDroneColors.warning,
+    // 浮层/菜单/卡片容器色（DropdownMenu、Card 等跟随日夜模式）
+    surfaceContainerLowest = LightDroneColors.background,
+    surfaceContainerLow = LightDroneColors.card,
+    surfaceContainer = LightDroneColors.card,
+    surfaceContainerHigh = LightDroneColors.card,
+    surfaceContainerHighest = LightDroneColors.muted,
+    surfaceBright = LightDroneColors.card,
+    surfaceDim = LightDroneColors.muted,
 )
 
 private val DarkColorScheme = lightColorScheme(
@@ -41,6 +49,14 @@ private val DarkColorScheme = lightColorScheme(
     onError = Color.White,
     secondary = DarkDroneColors.success,
     tertiary = DarkDroneColors.warning,
+    // 浮层/菜单/卡片容器色（DropdownMenu、Card 等跟随日夜模式）
+    surfaceContainerLowest = DarkDroneColors.background,
+    surfaceContainerLow = DarkDroneColors.card,
+    surfaceContainer = DarkDroneColors.card,
+    surfaceContainerHigh = DarkDroneColors.card,
+    surfaceContainerHighest = DarkDroneColors.muted,
+    surfaceBright = DarkDroneColors.card,
+    surfaceDim = DarkDroneColors.background,
 )
 
 @Composable

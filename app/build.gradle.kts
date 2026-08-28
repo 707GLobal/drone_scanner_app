@@ -20,9 +20,9 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        // 高德地图 API Key（在用户级 ~/.gradle/gradle.properties 配置 amapApiKey=你的Key）
-        manifestPlaceholders["AMAP_API_KEY"] =
-            (project.findProperty("amapApiKey") as String?) ?: "YOUR_AMAP_API_KEY"
+        // 腾讯位置服务地图 Key（在用户级 ~/.gradle/gradle.properties 配置 tencentMapKey=你的Key）
+        manifestPlaceholders["TENCENT_MAP_KEY"] =
+            (project.findProperty("tencentMapKey") as String?) ?: "YOUR_TENCENT_MAP_KEY"
     }
 
     buildFeatures {
@@ -32,7 +32,9 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // 开启代码混淆与资源收缩，显著减小 APK（高德 SDK keep 规则见 proguard-rules.pro）
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -56,12 +58,13 @@ dependencies {
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
-    implementation(libs.androidx.compose.material.icons.extended)
+    // 图标：使用 core 集 + 少量自定义（避免 extended 带来的 ~10MB 体积）
+    implementation(libs.androidx.compose.material.icons.core)
     implementation(libs.androidx.activity.compose)
     debugImplementation(libs.androidx.compose.ui.tooling)
 
-    // 高德地图 3D SDK
-    implementation(libs.amap3dmap)
+    // 腾讯位置服务地图 SDK
+    implementation(libs.tencent.map.sdk)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.espresso.core)

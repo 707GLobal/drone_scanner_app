@@ -2,8 +2,10 @@ package com.global_707.drone_scanner.ui.screens
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -38,13 +40,13 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Bluetooth
-import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -79,10 +81,13 @@ import com.global_707.drone_scanner.ui.components.FrostedPill
 import com.global_707.drone_scanner.ui.components.ScanningSpinner
 import com.global_707.drone_scanner.ui.components.StatusDot
 import com.global_707.drone_scanner.ui.map.DroneMap
+import com.global_707.drone_scanner.ui.map.LocateTarget
 import com.global_707.drone_scanner.ui.map.MapBackendProvider
 import com.global_707.drone_scanner.ui.map.MapControls
+import com.global_707.drone_scanner.ui.theme.AppIcons
 import com.global_707.drone_scanner.ui.theme.DroneTypography
 import com.global_707.drone_scanner.ui.theme.LocalDroneColors
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -127,6 +132,41 @@ fun MapHomeScreen(
         }
     }
 
+    // 实时轮询系统蓝牙 / Wi-Fi 开关：开关状态变化时重启扫描，保证扫描状态真实
+    LaunchedEffect(Unit) {
+        while (true) {
+            val changed = ScannerController.refreshSystemState(context)
+            if (changed) {
+                ScannerController.restart(appContext)
+            }
+            delay(2000)
+        }
+    }
+
+    // 系统开关提醒：设置中启用的扫描通道，但系统蓝牙/Wi-Fi 未开启 → 弹窗引导开启
+    val needBluetooth = AppPrefs.bluetoothScanEnabled && !ScannerController.bluetoothSystemOn
+    val needWifi = AppPrefs.wifiScanEnabled && !ScannerController.wifiSystemOn
+    var reminderDismissed by remember { mutableStateOf(false) }
+    val systemOk = !needBluetooth && !needWifi
+    // 系统恢复后重置"暂不"标记，下次再关闭时重新提醒
+    LaunchedEffect(systemOk) {
+        if (systemOk) reminderDismissed = false
+    }
+    if ((needBluetooth || needWifi) && !reminderDismissed) {
+        SystemSwitchReminderDialog(
+            needBluetooth = needBluetooth,
+            needWifi = needWifi,
+            onDismiss = { reminderDismissed = true },
+            onGoSettings = {
+                val intent = when {
+                    needBluetooth -> Intent(Settings.ACTION_BLUETOOTH_SETTINGS)
+                    else -> Intent(Settings.ACTION_WIFI_SETTINGS)
+                }
+                runCatching { context.startActivity(intent) }
+            },
+        )
+    }
+
     DisposableEffect(Unit) {
         onDispose { ScannerController.stop() }
     }
@@ -141,7 +181,7 @@ fun MapHomeScreen(
             drones = ScannerController.drones,
             satellite = AppPrefs.satelliteMap,
             showOperator = false,
-            showMyLocation = false,
+            showMyLocation = true,
             showLabels = true,
             modifier = Modifier.fillMaxSize(),
         )
@@ -189,12 +229,31 @@ fun MapHomeScreen(
         }
         MapControls(
             satellite = AppPrefs.satelliteMap,
+            locateTargets = listOfNotNull(
+                // 定位到设备位置
+                LocateTarget(
+                    icon = AppIcons.Phone,
+                    contentDescription = stringResource(R.string.locate_to_device),
+                    onClick = {
+                        if (!MapBackendProvider.backend.locateMe(context)) {
+                            android.widget.Toast.makeText(context, pendingFeatureHint, android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                ),
+                // 定位到所有无人机（视野框住全部，约 60% 区域）
+                ScannerController.drones
+                    .takeIf { list -> list.any { it.droneLat != null && it.droneLng != null } }
+                    ?.let {
+                        LocateTarget(
+                            icon = AppIcons.Flight,
+                            contentDescription = stringResource(R.string.locate_to_drone),
+                            onClick = {
+                                MapBackendProvider.backend.moveToDrones(ScannerController.drones)
+                            },
+                        )
+                    },
+            ),
             onToggleSatellite = { AppPrefs.saveSatelliteMap(!AppPrefs.satelliteMap) },
-            onLocateMe = {
-                if (!MapBackendProvider.backend.locateMe(context)) {
-                    android.widget.Toast.makeText(context, pendingFeatureHint, android.widget.Toast.LENGTH_SHORT).show()
-                }
-            },
             onResetNorth = {
                 if (!MapBackendProvider.backend.resetNorth(context)) {
                     android.widget.Toast.makeText(context, pendingFeatureHint, android.widget.Toast.LENGTH_SHORT).show()
@@ -283,6 +342,36 @@ private fun scanStatusInfo(permissionsGranted: Boolean): Pair<String, Color> {
     }
 }
 
+/** 系统蓝牙 / Wi-Fi 未开启提醒弹窗 */
+@Composable
+private fun SystemSwitchReminderDialog(
+    needBluetooth: Boolean,
+    needWifi: Boolean,
+    onDismiss: () -> Unit,
+    onGoSettings: () -> Unit,
+) {
+    val message = buildList {
+        if (needBluetooth) add(stringResource(R.string.reminder_bt))
+        if (needWifi) add(stringResource(R.string.reminder_wifi))
+    }.joinToString("\n")
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.reminder_title)) },
+        text = { Text(message) },
+        confirmButton = {
+            TextButton(onClick = onGoSettings) {
+                Text(stringResource(R.string.reminder_go_settings))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.reminder_later))
+            }
+        },
+    )
+}
+
 /** 通道错误描述（蓝牙 / Wi-Fi 错误码独立映射） */
 @Composable
 private fun channelErrorText(isBluetooth: Boolean, errorCode: Int): String = when {
@@ -346,7 +435,7 @@ private fun ScanStatusPanel(
 
         // Wi-Fi 通道
         ChannelStatusRow(
-            icon = Icons.Filled.Wifi,
+            icon = AppIcons.Wifi,
             isBluetooth = false,
             label = stringResource(R.string.scan_wifi),
             enabled = AppPrefs.wifiScanEnabled,
@@ -360,7 +449,7 @@ private fun ScanStatusPanel(
         )
         // 蓝牙通道
         ChannelStatusRow(
-            icon = Icons.Filled.Bluetooth,
+            icon = AppIcons.Bluetooth,
             isBluetooth = true,
             label = stringResource(R.string.scan_bluetooth),
             enabled = AppPrefs.bluetoothScanEnabled,
@@ -645,7 +734,7 @@ private fun DroneListItem(drone: Drone, onClick: () -> Unit, modifier: Modifier 
             )
             Spacer(Modifier.height(2.dp))
             Icon(
-                imageVector = Icons.Filled.ChevronRight,
+                imageVector = Icons.Filled.KeyboardArrowRight,
                 contentDescription = null,
                 tint = colors.mutedForeground,
                 modifier = Modifier.size(16.dp),

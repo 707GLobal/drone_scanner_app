@@ -8,6 +8,11 @@
     <string name="scan_status_off">扫描已关闭</string>
     <string name="scan_status_error">扫描异常</string>
     <string name="scan_status_stopped">已停止</string>
+    <string name="reminder_title">系统蓝牙 / Wi-Fi 未开启</string>
+    <string name="reminder_bt">系统蓝牙未开启，RID 扫描无法工作</string>
+    <string name="reminder_wifi">系统 Wi-Fi 未开启，Wi-Fi 扫描无法工作</string>
+    <string name="reminder_go_settings">前往开启</string>
+    <string name="reminder_later">暂不</string>
     <string name="scan_channel_off">已关闭</string>
     <string name="scan_channel_idle">未在扫描</string>
     <string name="scan_failed_code">扫描失败（错误码 %1$d）</string>
@@ -25,7 +30,7 @@
     <string name="empty_drones">未检测到无人机</string>
     <string name="empty_drones_hint">正在扫描附近 RID 信号，检测到设备后会显示在这里</string>
     <string name="map_placeholder_hint">地图占位\n接入真实地图 SDK 后自动替换</string>
-    <string name="map_feature_pending">占位地图暂不支持该操作，接入真实地图后可用</string>
+    <string name="map_feature_pending">当前地图暂不支持该操作</string>
     <string name="map_locate_failed">无法获取当前位置</string>
     <string name="distance_format">%1$sm</string>
     <string name="altitude_format">%1$sm</string>
@@ -33,6 +38,10 @@
 
     <!-- 地图悬浮控件 -->
     <string name="map_locate_me">定位到我的位置</string>
+    <string name="locate_to_title">定位到</string>
+    <string name="locate_to_device">设备位置</string>
+    <string name="locate_to_drone">无人机位置</string>
+    <string name="locate_to_operator">遥控站位置</string>
     <string name="map_reset_north">重置北向</string>
     <string name="map_enter_fullscreen">全屏查看</string>
     <string name="map_standard">标准地图</string>

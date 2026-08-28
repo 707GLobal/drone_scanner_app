@@ -50,6 +50,14 @@ object ScannerController {
     var scanState by mutableStateOf(ScanState(isScanning = false, wifiScanning = false, bluetoothScanning = false))
         private set
 
+    /** 系统蓝牙开关真实状态（实时读取，非写死） */
+    var bluetoothSystemOn by mutableStateOf(false)
+        private set
+
+    /** 系统 Wi-Fi 开关真实状态（实时读取，非写死） */
+    var wifiSystemOn by mutableStateOf(false)
+        private set
+
     private val detected = LinkedHashMap<String, DetectedDevice>()
 
     private var bluetoothLeScanner: BluetoothLeScanner? = null
@@ -113,10 +121,58 @@ object ScannerController {
         running = true
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         refreshLocation(context)
+        refreshSystemState(context)
         if (AppPrefs.bluetoothScanEnabled) startBluetooth(context)
         if (AppPrefs.wifiScanEnabled) startWifi(context)
         updateScanState()
         refresh()
+    }
+
+    /**
+     * 实时读取系统蓝牙 / Wi-Fi 开关状态（每次调用查询真实硬件状态，非写死）。
+     *
+     * 返回 true 表示开关状态与上次相比发生变化（供调用方决定是否重启扫描）。
+     * 检测到通道被关闭时，同步更新扫描状态为对应错误码，界面据此提示用户。
+     */
+    @SuppressLint("MissingPermission")
+    fun refreshSystemState(context: Context): Boolean {
+        val btOn = try {
+            (context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)
+                ?.adapter?.isEnabled == true
+        } catch (_: Exception) {
+            false
+        }
+        val wifiOn = try {
+            (context.getSystemService(Context.WIFI_SERVICE) as? WifiManager)?.isWifiEnabled == true
+        } catch (_: Exception) {
+            false
+        }
+        val changed = btOn != bluetoothSystemOn || wifiOn != wifiSystemOn
+        bluetoothSystemOn = btOn
+        wifiSystemOn = wifiOn
+
+        // 通道关闭时给出具体错误；重新开启时清除错误（扫描由调用方 restart 重建）
+        if (!btOn) {
+            if (AppPrefs.bluetoothScanEnabled) {
+                scanState = scanState.copy(
+                    bluetoothScanning = false,
+                    bluetoothErrorCode = ScanState.BT_ERR_DISABLED,
+                )
+            }
+        } else if (scanState.bluetoothErrorCode == ScanState.BT_ERR_DISABLED) {
+            scanState = scanState.copy(bluetoothErrorCode = null)
+        }
+        if (!wifiOn) {
+            if (AppPrefs.wifiScanEnabled) {
+                scanState = scanState.copy(
+                    wifiScanning = false,
+                    wifiErrorCode = ScanState.WIFI_ERR_UNAVAILABLE,
+                )
+            }
+        } else if (scanState.wifiErrorCode == ScanState.WIFI_ERR_UNAVAILABLE) {
+            scanState = scanState.copy(wifiErrorCode = null)
+        }
+        return changed
     }
 
     @SuppressLint("MissingPermission")

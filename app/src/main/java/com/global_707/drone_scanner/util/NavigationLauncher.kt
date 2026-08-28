@@ -1,13 +1,21 @@
+@file:SuppressLint("MissingPermission")
+
 package com.global_707.drone_scanner.util
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Location
+import android.location.LocationListener
 import android.location.LocationManager
 import android.net.Uri
+import android.os.Bundle
+import android.os.Looper
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 
 /** 外部导航启动器：通过 Uri Scheme 调起高德 / 百度 / Google Maps 等系统导航应用 */
 object NavigationLauncher {
@@ -67,9 +75,7 @@ object NavigationLauncher {
 
     /** 获取最近一次已知位置（GPS 优先，网络定位兜底） */
     fun lastKnownLocation(context: Context): Location? {
-        if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) !=
-            PackageManager.PERMISSION_GRANTED
-        ) return null
+        if (!hasLocationPermission(context)) return null
         return try {
             val manager = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return null
             manager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
@@ -78,4 +84,54 @@ object NavigationLauncher {
             null
         }
     }
+
+    /**
+     * 获取当前位置（挂起函数）：
+     * 优先返回最近已知位置；若为空则主动请求一次定位，
+     * [timeoutMs] 内无结果返回 null。
+     * 调用前已检查定位权限（hasLocationPermission），异常已捕获。
+     */
+    @SuppressLint("MissingPermission")
+    suspend fun currentLocation(context: Context, timeoutMs: Long = 5000): Location? {
+        lastKnownLocation(context)?.let { return it }
+        if (!hasLocationPermission(context)) return null
+        val manager = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return null
+        return suspendCancellableCoroutine { continuation ->
+            val listener = object : LocationListener {
+                override fun onLocationChanged(location: Location) {
+                    if (continuation.isActive) continuation.resume(location)
+                }
+
+                override fun onProviderEnabled(provider: String) = Unit
+
+                override fun onProviderDisabled(provider: String) = Unit
+
+                @Deprecated("Deprecated in Java")
+                override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) = Unit
+            }
+            var done = false
+            val finish: (Location?) -> Unit = { loc ->
+                if (!done) {
+                    done = true
+                    runCatching { manager.removeUpdates(listener) }
+                    if (continuation.isActive) continuation.resume(loc)
+                }
+            }
+            runCatching {
+                manager.requestSingleUpdate(LocationManager.GPS_PROVIDER, listener, Looper.getMainLooper())
+                manager.requestSingleUpdate(LocationManager.NETWORK_PROVIDER, listener, Looper.getMainLooper())
+            }
+            continuation.invokeOnCancellation {
+                finish(null)
+            }
+            Thread {
+                Thread.sleep(timeoutMs)
+                finish(null)
+            }.start()
+        }
+    }
+
+    private fun hasLocationPermission(context: Context): Boolean =
+        ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED
 }
