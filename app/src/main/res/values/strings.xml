@@ -1,3 +1,48 @@
 <resources>
-    <string name="app_name">Drone_scanner</string>
+    <string name="app_name">无人机检测</string>
+
+    <!-- Map Home -->
+    <string name="scanning">扫描中</string>
+    <string name="wifi_scanning">WiFi 2.4GHz 扫描中…</string>
+    <string name="bluetooth_scanning">蓝牙 扫描中…</string>
+    <string name="detected_drones">已检测无人机</string>
+    <string name="operator_distance_format">飞手距%1$dm</string>
+    <string name="time_ago_format">%1$ds前</string>
+
+    <!-- Drone Detail -->
+    <string name="detail_title">无人机详情</string>
+    <string name="label_sn">SN码</string>
+    <string name="label_reg_code">注册码</string>
+    <string name="metric_height">高度</string>
+    <string name="metric_distance">距离</string>
+    <string name="metric_speed">速度</string>
+    <string name="signal_strength_format">信号强度: %1$s</string>
+    <string name="signal_strong">强</string>
+    <string name="signal_medium">中</string>
+    <string name="signal_weak">弱</string>
+    <string name="protocol">协议</string>
+    <string name="frequency">频率</string>
+    <string name="realtime_updating">实时更新中</string>
+    <string name="location_title">位置信息</string>
+    <string name="drone_label">无人机</string>
+    <string name="operator_label">飞手</string>
+    <string name="coord_format">N %1$.4f°, E %2$.4f°</string>
+    <string name="operator_title">飞手信息</string>
+    <string name="operator_id">操作员ID</string>
+    <string name="ground_station">地面站位置</string>
+    <string name="contact">联系方式</string>
+    <string name="watch_button">标记关注</string>
+    <string name="watched_toast">已标记关注</string>
+    <string name="unit_m">m</string>
+    <string name="unit_ms">m/s</string>
+
+    <!-- Settings -->
+    <string name="settings_title">设置</string>
+    <string name="search_settings">搜索设置</string>
+    <string name="map_settings">地图设置</string>
+    <string name="display_settings">显示设置</string>
+    <string name="about_us">关于我们</string>
+    <string name="check_update">检查更新</string>
+    <string name="latest_version">v1.0.0 已是最新版本</string>
+    <string name="app_version">v1.0.0</string>
 </resources>
