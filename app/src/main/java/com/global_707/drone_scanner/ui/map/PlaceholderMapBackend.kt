@@ -2,10 +2,12 @@ package com.global_707.drone_scanner.ui.map
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -24,6 +26,7 @@ import com.global_707.drone_scanner.ui.components.PulseDot
 import com.global_707.drone_scanner.ui.theme.DroneTypography
 import com.global_707.drone_scanner.ui.theme.LocalDroneColors
 import com.global_707.drone_scanner.ui.theme.MapBackgroundColor
+import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.math.min
 
@@ -32,9 +35,11 @@ import kotlin.math.min
  *
  * 用于真实地图 SDK 接入前的界面预览：
  *  - 无需 API Key / 网络，模拟器与真机均可运行
- *  - 支持 卫星/标准 配色、飞手标记、名称标签等设置联动
+ *  - 无人机标记按设备 ID Hash 取色（不同飞机颜色不同），标记紧凑且只显示呼号（ID 后四位）
+ *  - 首页只显示飞机标记；详情页显示 飞机 + 遥控站 + 我的位置 三个动态标记
+ *  - 支持 卫星/标准 配色切换
  *
- * 标记位置为归一化坐标，按地图区域等比放置。
+ * 标记位置为归一化示意坐标（真实 SDK 接入后按经纬度绘制）。
  */
 class PlaceholderMapBackend : MapBackend {
 
@@ -47,20 +52,31 @@ class PlaceholderMapBackend : MapBackend {
         Offset(0.72f, 0.62f),
     )
 
-    /** 飞手标记相对无人机的偏移 */
-    private val operatorOffset = Offset(-0.06f, 0.08f)
+    /** 遥控站标记相对无人机的偏移 */
+    private val operatorOffset = Offset(-0.07f, 0.075f)
+
+    /** 我的位置示意位置 */
+    private val myLocationPos = Offset(0.5f, 0.78f)
 
     @Composable
     override fun Content(
         drones: List<Drone>,
         satellite: Boolean,
         showOperator: Boolean,
+        showMyLocation: Boolean,
         showLabels: Boolean,
         modifier: Modifier,
     ) {
         val colors = LocalDroneColors.current
-        val background = if (satellite) Color(0xFF39414A) else MapBackgroundColor
-        val gridColor = if (satellite) Color(0xFF4E5864) else colors.border
+        // 适配系统深色模式：深色主题下占位地图使用深色底图，避免出格
+        val darkTheme = isSystemInDarkTheme()
+        val background = when {
+            satellite -> Color(0xFF2A3038)
+            darkTheme -> Color(0xFF1C1C1E)
+            else -> MapBackgroundColor
+        }
+        val gridColor = if (satellite || darkTheme) Color(0xFF4E5864) else colors.border
+        val labelColor = if (satellite || darkTheme) Color.White else Color.Black.copy(alpha = 0.85f)
 
         BoxWithConstraints(modifier) {
             val w = maxWidth
@@ -72,7 +88,7 @@ class PlaceholderMapBackend : MapBackend {
                 modifier = Modifier.fillMaxSize(),
             )
 
-            // 飞手 → 无人机 虚线连接
+            // 遥控站 → 无人机 虚线连接（详情页）
             Canvas(Modifier.fillMaxSize()) {
                 val dash = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 4.dp.toPx()))
                 val lineLength = 32.dp.toPx()
@@ -98,41 +114,55 @@ class PlaceholderMapBackend : MapBackend {
                 }
             }
 
-            // 无人机标记（蓝色脉冲）+ 名称标签
+            // 无人机标记：ID Hash 取色 + 呼号（紧凑标签）
             drones.forEachIndexed { index, drone ->
                 val pos = dronePositions[index % dronePositions.size]
+                val markerColor = colorForDrone(drone)
                 PulseDot(
-                    color = colors.primary,
-                    size = 18.dp,
+                    color = markerColor,
+                    size = 12.dp,
                     modifier = Modifier.offset(
-                        x = w * pos.x - 9.dp,
-                        y = h * pos.y - 9.dp,
+                        x = w * pos.x - 6.dp,
+                        y = h * pos.y - 6.dp,
                     ),
                 )
                 if (showLabels) {
                     Text(
                         text = drone.name,
                         style = DroneTypography.micro,
-                        color = if (satellite) Color.White else colors.primary,
+                        color = labelColor,
+                        textAlign = TextAlign.Center,
                         modifier = Modifier.offset(
-                            x = w * pos.x + 8.dp,
-                            y = h * pos.y - 6.dp,
+                            x = w * pos.x - 14.dp,
+                            y = h * pos.y + 6.dp,
                         ),
                     )
                 }
             }
 
-            // 飞手标记（绿色脉冲）
+            // 遥控站标记（绿色，详情页）
             drones.forEachIndexed { index, drone ->
                 if (!showOperator || drone.operatorLat == null) return@forEachIndexed
                 val pos = dronePositions[index % dronePositions.size]
                 val opPos = pos + operatorOffset
                 PulseDot(
                     color = colors.success,
-                    size = 12.dp,
+                    size = 10.dp,
                     modifier = Modifier.offset(
-                        x = w * opPos.x - 6.dp,
-                        y = h * opPos.y - 6.dp,
+                        x = w * opPos.x - 5.dp,
+                        y = h * opPos.y - 5.dp,
+                    ),
+                )
+            }
+
+            // 我的位置（蓝色小点，详情页）
+            if (showMyLocation) {
+                PulseDot(
+                    color = Color(0xFF1E88E5),
+                    size = 8.dp,
+                    modifier = Modifier.offset(
+                        x = w * myLocationPos.x - 4.dp,
+                        y = h * myLocationPos.y - 4.dp,
                     ),
                 )
             }
@@ -148,5 +178,11 @@ class PlaceholderMapBackend : MapBackend {
                 )
             }
         }
+    }
+
+    /** 按设备 ID Hash 取色：不同飞机颜色不同、色调均匀分布 */
+    private fun colorForDrone(drone: Drone): Color {
+        val hue = (abs(drone.id.hashCode()) % 360).toFloat()
+        return Color.hsv(hue, 0.72f, 0.95f)
     }
 }

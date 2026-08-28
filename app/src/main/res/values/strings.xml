@@ -1,10 +1,23 @@
 <resources>
     <string name="app_name">无人机检测</string>
+    <string name="app_subtitle">Remote ID 信号侦查</string>
 
     <!-- Map Home -->
     <string name="scanning">扫描中</string>
-    <string name="wifi_scanning">WiFi 2.4GHz 扫描中…</string>
-    <string name="bluetooth_scanning">蓝牙 扫描中…</string>
+    <string name="scan_status_perm">权限不足</string>
+    <string name="scan_status_off">扫描已关闭</string>
+    <string name="scan_status_error">扫描异常</string>
+    <string name="scan_status_stopped">已停止</string>
+    <string name="scan_channel_off">已关闭</string>
+    <string name="scan_channel_idle">未在扫描</string>
+    <string name="scan_failed_code">扫描失败（错误码 %1$d）</string>
+    <string name="bt_unavailable">设备不支持蓝牙</string>
+    <string name="bt_disabled">系统蓝牙未开启</string>
+    <string name="wifi_unavailable">Wi-Fi 未开启或不可用</string>
+    <string name="scan_panel_solution">请前往「搜索设置」检查扫描开关、权限与设备能力</string>
+    <string name="goto_search_settings">前往搜索设置</string>
+    <string name="wifi_scanning">Wi-Fi 扫描中…</string>
+    <string name="bluetooth_scanning">蓝牙扫描中…</string>
     <string name="scan_off">已关闭</string>
     <string name="permission_required">需授权扫描权限</string>
     <string name="detected_drones">已检测无人机</string>
@@ -12,58 +25,83 @@
     <string name="empty_drones">未检测到无人机</string>
     <string name="empty_drones_hint">正在扫描附近 RID 信号，检测到设备后会显示在这里</string>
     <string name="map_placeholder_hint">地图占位\n接入真实地图 SDK 后自动替换</string>
-    <string name="operator_distance_format">飞手距%1$dm</string>
+    <string name="map_feature_pending">占位地图暂不支持该操作，接入真实地图后可用</string>
+    <string name="map_locate_failed">无法获取当前位置</string>
+    <string name="distance_format">%1$sm</string>
+    <string name="altitude_format">%1$sm</string>
     <string name="time_ago_format">%1$ds前</string>
 
-    <!-- Drone Detail -->
-    <string name="detail_title">无人机详情</string>
-    <string name="label_sn">SN码</string>
-    <string name="label_reg_code">注册码</string>
-    <string name="metric_height">高度</string>
-    <string name="metric_distance">距离</string>
-    <string name="metric_speed">速度</string>
-    <string name="signal_strength_format">信号强度: %1$s</string>
-    <string name="signal_strong">强</string>
-    <string name="signal_medium">中</string>
-    <string name="signal_weak">弱</string>
-    <string name="protocol">协议</string>
-    <string name="frequency">频率</string>
-    <string name="realtime_updating">实时更新中</string>
-    <string name="location_title">位置信息</string>
-    <string name="drone_label">无人机</string>
+    <!-- 地图悬浮控件 -->
+    <string name="map_locate_me">定位到我的位置</string>
+    <string name="map_reset_north">重置北向</string>
+    <string name="map_enter_fullscreen">全屏查看</string>
+    <string name="map_standard">标准地图</string>
+    <string name="map_satellite">卫星地图</string>
+
+    <!-- 详情页 -->
+    <string name="back">返回</string>
+    <string name="nav_to_drone">导航到飞机</string>
+    <string name="nav_to_operator">导航到遥控站</string>
     <string name="operator_label">飞手</string>
-    <string name="coord_format">N %1$.4f°, E %2$.4f°</string>
-    <string name="operator_title">飞手信息</string>
-    <string name="operator_id">操作员ID</string>
-    <string name="ground_station">地面站位置</string>
-    <string name="contact">联系方式</string>
-    <string name="watch_button">标记关注</string>
-    <string name="watched_toast">已标记关注</string>
-    <string name="unit_m">m</string>
-    <string name="unit_ms">m/s</string>
+    <string name="kv_basic_info">基本信息</string>
+    <string name="kv_motion">运动状态</string>
+    <string name="kv_operator">操控者</string>
+    <string name="kv_serial">序列号</string>
+    <string name="kv_id_type">ID 类型</string>
+    <string name="kv_proto_version">协议版本</string>
+    <string name="kv_signal">信号强度</string>
+    <string name="kv_protocol">协议</string>
+    <string name="kv_frequency">频率</string>
+    <string name="kv_last_seen">最后发现</string>
+    <string name="kv_speed_h">水平速度</string>
+    <string name="kv_speed_v">垂直速度</string>
+    <string name="kv_pressure_alt">气压高度</string>
+    <string name="kv_geodetic_alt">地理高度</string>
+    <string name="kv_height_above">起飞点高度</string>
+    <string name="kv_direction">航向</string>
+    <string name="kv_timestamp">RID 时间戳</string>
+    <string name="kv_lat">纬度</string>
+    <string name="kv_lng">经度</string>
+    <string name="kv_distance">距离本机</string>
+    <string name="kv_operator_id">操作员 ID</string>
+    <string name="kv_operator_pos">遥控站位置</string>
 
     <!-- Settings -->
     <string name="settings_title">设置</string>
     <string name="search_settings">搜索设置</string>
-    <string name="map_settings">地图设置</string>
     <string name="display_settings">显示设置</string>
     <string name="about_us">关于我们</string>
-    <string name="check_update">检查更新</string>
-    <string name="latest_version">v1.0.0 已是最新版本</string>
     <string name="app_version">v1.0.0</string>
-    <string name="current_version">当前版本 v%1$s</string>
-    <string name="enable_wifi_scan">启用 WiFi 扫描</string>
-    <string name="enable_bt_scan">启用蓝牙扫描</string>
+
+    <!-- 搜索设置（全部中文） -->
+    <string name="scan_group_bluetooth">蓝牙扫描</string>
+    <string name="scan_group_wifi">Wi-Fi 扫描</string>
+    <string name="scan_bluetooth">蓝牙</string>
+    <string name="scan_wifi">Wi-Fi</string>
+    <string name="bt4_legacy_supported">支持蓝牙 4 传统广播（Legacy）</string>
+    <string name="bt4_legacy_desc">设备支持 Bluetooth 4 Legacy 技术，可用于检测无人机 Remote ID 信号</string>
+    <string name="bt5_extended_supported">支持蓝牙 5 扩展广播（Extended）</string>
+    <string name="bt5_extended_desc">设备支持蓝牙 5 扩展广播（长距/2M PHY），可检测更远距离的 Remote ID 信号</string>
+    <string name="wifi_nan_supported">支持 Wi-Fi NAN</string>
+    <string name="wifi_nan_not_supported">不支持 Wi-Fi NAN</string>
+    <string name="wifi_nan_desc">Wi-Fi Aware（NAN）是无人机 Remote ID 的 Wi-Fi 承载通道，不支持时仅可通过蓝牙检测</string>
+    <string name="scan_priority">扫描优先级</string>
+    <string name="scan_priority_low">低</string>
+    <string name="scan_priority_normal">中</string>
+    <string name="scan_priority_high">高</string>
+    <string name="scan_priority_desc">优先级越高，数据采集越多，但耗电也越高。修改后立即重启扫描生效。</string>
+    <string name="scan_mode_current">当前蓝牙扫描模式：%1$s</string>
+    <string name="scan_mode_low_power">低功耗</string>
+    <string name="scan_mode_balanced">均衡</string>
+    <string name="scan_mode_low_latency">低延迟</string>
+
+    <!-- 显示设置 -->
+    <string name="keep_screen_on">阻止机器休眠</string>
+
+    <!-- 关于我们 -->
+    <string name="about_static_note">无人机 RID 检测应用</string>
+    <string name="about_desc">通过蓝牙与 Wi-Fi 广播扫描附近无人机的 Remote ID（ASTM F3411）信号，解包并展示序列号、速度、气压/地理高度、时间戳等真实字段。检测数据全部来自真实 RID 信号解包。</string>
     <string name="demo_mode">演示模式</string>
-    <string name="demo_mode_desc">无检测结果时显示示例数据</string>
-    <string name="map_type">地图类型</string>
-    <string name="map_standard">标准</string>
-    <string name="map_satellite">卫星</string>
-    <string name="show_operator_markers">显示飞手标记</string>
-    <string name="show_name_labels">显示名称标签</string>
-    <string name="checking_update">正在检查…</string>
-    <string name="update_latest">当前已是最新版本</string>
-    <string name="update_failed">检查更新失败，请检查网络</string>
+    <string name="demo_mode_desc">无检测结果时显示示例数据（带"演示"标签），便于预览界面效果</string>
     <string name="github_repo">GitHub 仓库</string>
-    <string name="about_desc">无人机 Remote ID（RID）检测应用。通过蓝牙与 WiFi 广播扫描附近无人机，显示位置、高度、速度等信息，用于反制与空域监测。</string>
 </resources>

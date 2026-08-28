@@ -2,7 +2,6 @@ package com.global_707.drone_scanner.data
 
 import android.Manifest
 import android.annotation.SuppressLint
-import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.bluetooth.le.BluetoothLeScanner
 import android.bluetooth.le.ScanCallback
@@ -11,6 +10,7 @@ import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.content.pm.PackageManager
+import android.location.Location
 import android.location.LocationManager
 import android.net.wifi.ScanResult as WifiScanResult
 import android.net.wifi.WifiManager
@@ -35,14 +35,14 @@ import kotlin.math.sqrt
 
 /**
  * 真实 RID 扫描控制器：
- *  - 蓝牙：扫描 RID Service UUID（0xFFFA-0xFFFD）广播并解析（ASTM F3411）
- *  - WiFi：扫描带 ASTM OUI (FA-0B-9C) 制造商 IE 的信标
- *  - 同一设备的多次广播（序列号 / 位置可能分帧）会被合并
- *  - 演示模式：设置开启时，在真实结果基础上叠加示例数据
+ *  - 蓝牙：扫描 RID Service UUID（0xFFFA-0xFFFD）广播并完整解包（ASTM F3411）
+ *  - WiFi：扫描带 ASTM OUI (FA-0B-9C) 制造商 IE 的信标（Android 16+）
+ *  - 同一设备的多次广播（序列号 / 位置 / 操作员分帧）会被合并
+ *  - 扫描优先级（低/中/高）影响蓝牙扫描模式与功耗
  */
 object ScannerController {
 
-    /** 当前无人机列表（真实检测 + 可选演示数据） */
+    /** 当前无人机列表（全部来自真实检测，无模拟数据） */
     var drones by mutableStateOf<List<Drone>>(emptyList())
         private set
 
@@ -57,19 +57,26 @@ object ScannerController {
     private var wifiManager: WifiManager? = null
     private var scope: CoroutineScope? = null
     private var wifiJob: Job? = null
-    private var lastKnownLocation: android.location.Location? = null
+    private var lastKnownLocation: Location? = null
     @Volatile
     private var running = false
 
     /** 单台设备的累积状态（合并 Basic ID / Location / Operator 分帧消息） */
-    private class DetectedDevice {
-        val key: String
+    private class DetectedDevice(val key: String) {
         var serial: String? = null
         var idType: Int? = null
+        var protocolVersion: Int? = null
+        var messageCounter: Int? = null
+        var statusFlags: Int? = null
+        var directionDeg: Float? = null
+        var speedMs: Float? = null
+        var verticalSpeedMs: Float? = null
         var latitude: Double? = null
         var longitude: Double? = null
-        var speedMs: Float? = null
-        var altitudeM: Float? = null
+        var pressureAltitudeM: Float? = null
+        var geodeticAltitudeM: Float? = null
+        var heightAboveTakeoffM: Float? = null
+        var ridTimestampSeconds: Float? = null
         var operatorId: String? = null
         var operatorLatitude: Double? = null
         var operatorLongitude: Double? = null
@@ -78,17 +85,21 @@ object ScannerController {
         var rssi = -100
         var lastSeen = 0L
 
-        constructor(key: String) {
-            this.key = key
-        }
-
         fun merge(msg: BluetoothRidParser.RidMessage) {
             msg.serialNumber?.let { serial = it }
             msg.idType?.let { idType = it }
+            msg.protocolVersion?.let { protocolVersion = it }
+            msg.messageCounter?.let { messageCounter = it }
+            msg.statusFlags?.let { statusFlags = it }
+            msg.directionDeg?.let { directionDeg = it }
+            msg.speedMs?.let { speedMs = it }
+            msg.verticalSpeedMs?.let { verticalSpeedMs = it }
             msg.latitude?.let { latitude = it }
             msg.longitude?.let { longitude = it }
-            msg.speedMs?.let { speedMs = it }
-            msg.altitudeM?.let { altitudeM = it }
+            msg.pressureAltitudeM?.let { pressureAltitudeM = it }
+            msg.geodeticAltitudeM?.let { geodeticAltitudeM = it }
+            msg.heightAboveTakeoffM?.let { heightAboveTakeoffM = it }
+            msg.ridTimestampSeconds?.let { ridTimestampSeconds = it }
             msg.operatorId?.let { operatorId = it }
             msg.operatorLatitude?.let { operatorLatitude = it }
             msg.operatorLongitude?.let { operatorLongitude = it }
@@ -145,10 +156,10 @@ object ScannerController {
         scanState = ScanState(isScanning = false, wifiScanning = false, bluetoothScanning = false)
     }
 
-    /** 演示模式 / 检测结果变化后刷新对外列表 */
+    /** 检测结果变化后刷新对外列表（演示模式开启时叠加演示数据） */
     fun refresh() {
         val real = synchronized(detected) { detected.values.toList() }
-            .filter { it.serial != null || it.latitude != null }
+            .filter { it.serial != null || it.latitude != null || it.protocol == "WiFi RID" }
             .map { toDrone(it) }
         drones = if (AppPrefs.demoMode) real + MockData.drones else real
     }
@@ -157,10 +168,32 @@ object ScannerController {
 
     @SuppressLint("MissingPermission")
     private fun startBluetooth(context: Context) {
-        val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager ?: return
-        val adapter = manager.adapter ?: return
-        if (!adapter.isEnabled) return
-        val scanner = adapter.bluetoothLeScanner ?: return
+        val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+        val adapter = manager?.adapter
+        if (adapter == null) {
+            // 设备不支持蓝牙
+            scanState = scanState.copy(
+                bluetoothScanning = false,
+                bluetoothErrorCode = ScanState.BT_ERR_UNAVAILABLE,
+            )
+            return
+        }
+        if (!adapter.isEnabled) {
+            // 系统蓝牙未开启
+            scanState = scanState.copy(
+                bluetoothScanning = false,
+                bluetoothErrorCode = ScanState.BT_ERR_DISABLED,
+            )
+            return
+        }
+        val scanner = adapter.bluetoothLeScanner
+        if (scanner == null) {
+            scanState = scanState.copy(
+                bluetoothScanning = false,
+                bluetoothErrorCode = ScanState.BT_ERR_UNAVAILABLE,
+            )
+            return
+        }
         bluetoothLeScanner = scanner
         val filters = BluetoothRidParser.RID_SERVICE_UUIDS.map { uuid16 ->
             ScanFilter.Builder()
@@ -168,7 +201,7 @@ object ScannerController {
                 .build()
         }
         val settings = ScanSettings.Builder()
-            .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+            .setScanMode(scanModeFor(AppPrefs.scanPriority))
             .build()
         scanCallback = object : ScanCallback() {
             override fun onScanResult(callbackType: Int, result: ScanResult) {
@@ -176,14 +209,28 @@ object ScannerController {
             }
 
             override fun onScanFailed(errorCode: Int) {
-                scanState = scanState.copy(bluetoothScanning = false)
+                scanState = scanState.copy(
+                    bluetoothScanning = false,
+                    bluetoothErrorCode = errorCode,
+                )
             }
         }
         try {
             scanner.startScan(filters, settings, scanCallback)
+            scanState = scanState.copy(bluetoothScanning = true, bluetoothErrorCode = null)
         } catch (_: Exception) {
             scanCallback = null
+            scanState = scanState.copy(
+                bluetoothScanning = false,
+                bluetoothErrorCode = ScanState.BT_ERR_UNAVAILABLE,
+            )
         }
+    }
+
+    private fun scanModeFor(priority: Int): Int = when (priority) {
+        ScanPriority.LOW -> ScanSettings.SCAN_MODE_LOW_POWER
+        ScanPriority.NORMAL -> ScanSettings.SCAN_MODE_BALANCED
+        else -> ScanSettings.SCAN_MODE_LOW_LATENCY
     }
 
     private fun handleBluetoothResult(result: ScanResult) {
@@ -204,8 +251,18 @@ object ScannerController {
     // ---------- WiFi ----------
 
     private fun startWifi(context: Context) {
-        wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager ?: return
-        if (wifiManager?.isWifiEnabled != true) return
+        wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+        if (wifiManager == null || wifiManager?.isWifiEnabled != true) {
+            // Wi-Fi 不可用或未开启
+            scanState = scanState.copy(
+                wifiScanning = false,
+                wifiErrorCode = ScanState.WIFI_ERR_UNAVAILABLE,
+            )
+            return
+        }
+        wifiManager?.let {
+            scanState = scanState.copy(wifiScanning = true, wifiErrorCode = null)
+        }
         wifiJob = scope?.launch {
             while (isActive) {
                 try {
@@ -223,7 +280,7 @@ object ScannerController {
                 results.forEach { result ->
                     if (hasRidOui(result)) {
                         val key = "wifi:" + (result.BSSID ?: result.SSID)
-                        val device = synchronized(detected) {
+                        synchronized(detected) {
                             detected.getOrPut(key) {
                                 DetectedDevice(key).apply {
                                     protocol = "WiFi RID"
@@ -303,11 +360,7 @@ object ScannerController {
         } else {
             null
         }
-        val name = if (d.protocol == "WiFi RID") {
-            "WiFi RID 设备"
-        } else {
-            serial?.let { "无人机 · ${it.takeLast(8)}" } ?: "蓝牙 RID 设备"
-        }
+        val callSign = serial?.takeLast(4) ?: d.key.takeLast(4).replace(":", "").ifEmpty { "N/A" }
         val status = when {
             serial == null -> DroneStatus.WARNING
             d.idType == 3 || d.idType == 4 -> DroneStatus.WARNING
@@ -315,22 +368,29 @@ object ScannerController {
         }
         return Drone(
             id = d.key,
-            name = name,
-            snCode = serial ?: "—",
-            ridCode = serial ?: "—",
-            heightM = d.altitudeM,
-            distanceM = distance?.toFloat(),
+            name = callSign,
+            snCode = serial,
+            idType = d.idType,
+            protocolVersion = d.protocolVersion,
+            messageCounter = d.messageCounter,
+            statusFlags = d.statusFlags,
+            directionDeg = d.directionDeg,
             speedMs = d.speedMs,
-            signalStrength = rssiToSignal(d.rssi),
-            protocol = d.protocol,
-            frequency = d.frequency,
-            droneLat = d.latitude ?: 0.0,
-            droneLng = d.longitude ?: 0.0,
+            verticalSpeedMs = d.verticalSpeedMs,
+            pressureAltitudeM = d.pressureAltitudeM,
+            geodeticAltitudeM = d.geodeticAltitudeM,
+            heightAboveTakeoffM = d.heightAboveTakeoffM,
+            ridTimestampSeconds = d.ridTimestampSeconds,
+            droneLat = d.latitude,
+            droneLng = d.longitude,
+            distanceM = distance?.toFloat(),
             operatorLat = d.operatorLatitude,
             operatorLng = d.operatorLongitude,
             operatorId = d.operatorId,
-            operatorPhone = null,
             operatorDistanceM = operatorDistance?.toInt(),
+            signalStrength = rssiToSignal(d.rssi),
+            protocol = d.protocol,
+            frequency = d.frequency,
             lastSeenSeconds = ((System.currentTimeMillis() - d.lastSeen) / 1000).toInt(),
             status = status,
         )

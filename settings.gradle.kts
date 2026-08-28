@@ -19,6 +19,8 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // 高德地图 SDK 仅发布在阿里云镜像仓库
+        maven("https://maven.aliyun.com/repository/public")
     }
 }
 

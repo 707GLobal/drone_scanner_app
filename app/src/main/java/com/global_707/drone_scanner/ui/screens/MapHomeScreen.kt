@@ -7,10 +7,20 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -18,7 +28,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -38,38 +49,56 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.global_707.drone_scanner.R
 import com.global_707.drone_scanner.data.AppPrefs
 import com.global_707.drone_scanner.data.Drone
 import com.global_707.drone_scanner.data.DroneStatus
+import com.global_707.drone_scanner.data.ScanState
 import com.global_707.drone_scanner.data.ScannerController
 import com.global_707.drone_scanner.ui.components.FrostedPill
-import com.global_707.drone_scanner.ui.components.PulseDot
 import com.global_707.drone_scanner.ui.components.ScanningSpinner
 import com.global_707.drone_scanner.ui.components.StatusDot
 import com.global_707.drone_scanner.ui.map.DroneMap
+import com.global_707.drone_scanner.ui.map.MapBackendProvider
+import com.global_707.drone_scanner.ui.map.MapControls
 import com.global_707.drone_scanner.ui.theme.DroneTypography
 import com.global_707.drone_scanner.ui.theme.LocalDroneColors
+import kotlinx.coroutines.launch
 import java.util.Locale
+import kotlin.math.roundToInt
 
 /**
- * 页面一：地图主页（Map Home）
- * 高德地图 + 真实 RID 扫描标记 + 毛玻璃按钮 + 可展开扫描面板 + 底部无人机列表。
+ * 首页（Main）：
+ *  - 上层：全屏地图，仅显示飞机标记（不显示遥控站）
+ *  - 右下：扫描状态按钮（固定不动、显示真实状态），点击缩放展开扫描状态面板，
+ *    点击面板外任意位置关闭
+ *  - 左下：地图悬浮控件（图层 / 定位 / 北向）
+ *  - 下层：可拖拽 Bottom Sheet（常驻 1/3 屏，上拉展开全屏列表）
  */
 @Composable
 fun MapHomeScreen(
     onOpenSettings: () -> Unit,
+    onOpenSearchSettings: () -> Unit,
     onDroneClick: (Drone) -> Unit,
 ) {
     val colors = LocalDroneColors.current
@@ -77,6 +106,7 @@ fun MapHomeScreen(
     val appContext = context.applicationContext
     var scanPanelVisible by remember { mutableStateOf(false) }
     var permissionsGranted by remember { mutableStateOf(checkAllPermissions(context)) }
+    val pendingFeatureHint = stringResource(R.string.map_feature_pending)
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
@@ -89,7 +119,6 @@ fun MapHomeScreen(
         }
     }
 
-    // 首次进入：请求权限并启动扫描
     LaunchedEffect(Unit) {
         if (!permissionsGranted) {
             permissionLauncher.launch(neededPermissions().toTypedArray())
@@ -98,65 +127,40 @@ fun MapHomeScreen(
         }
     }
 
-    // 离开页面停止扫描
     DisposableEffect(Unit) {
         onDispose { ScannerController.stop() }
     }
 
-    Column(
+    Box(
         Modifier
             .fillMaxSize()
             .background(colors.background),
     ) {
-        // ---- 地图区域 ----
-        MapArea(
-            permissionsGranted = permissionsGranted,
-            scanPanelVisible = scanPanelVisible,
-            onToggleScanPanel = { scanPanelVisible = !scanPanelVisible },
-            onOpenSettings = onOpenSettings,
-            onRequestPermissions = {
-                permissionLauncher.launch(neededPermissions().toTypedArray())
-            },
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f),
-        )
-
-        // ---- 底部无人机列表面板 ----
-        DroneListPanel(
-            drones = ScannerController.drones,
-            isDemoMode = AppPrefs.demoMode,
-            onDroneClick = onDroneClick,
-        )
-    }
-}
-
-/** 地图区域：高德地图 + 毛玻璃按钮 + 扫描状态面板 */
-@Composable
-private fun MapArea(
-    permissionsGranted: Boolean,
-    scanPanelVisible: Boolean,
-    onToggleScanPanel: () -> Unit,
-    onOpenSettings: () -> Unit,
-    onRequestPermissions: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val colors = LocalDroneColors.current
-
-    Box(modifier) {
-        // 地图（预留接口：接入真实地图 SDK 后自动替换，见 ui/map/MapBackend.kt）
+        // ---- 地图（铺满全屏） ----
         DroneMap(
             drones = ScannerController.drones,
             satellite = AppPrefs.satelliteMap,
-            showOperator = AppPrefs.showOperatorMarkers,
-            showLabels = AppPrefs.showNameLabels,
+            showOperator = false,
+            showMyLocation = false,
+            showLabels = true,
             modifier = Modifier.fillMaxSize(),
         )
+
+        // 扫描面板展开时：点击地图其他区域关闭（不消费拖动，真实地图接入后不受影响）
+        if (scanPanelVisible) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .pointerInput(Unit) {
+                        detectTapGestures { scanPanelVisible = false }
+                    },
+            )
+        }
 
         // 权限未授予提示
         if (!permissionsGranted) {
             FrostedPill(
-                onClick = onRequestPermissions,
+                onClick = { permissionLauncher.launch(neededPermissions().toTypedArray()) },
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .padding(top = 56.dp),
@@ -169,7 +173,7 @@ private fun MapArea(
             }
         }
 
-        // 左上角：设置入口
+        // ---- 左上角：设置入口 + 地图悬浮控件 ----
         FrostedPill(
             onClick = onOpenSettings,
             modifier = Modifier
@@ -183,71 +187,228 @@ private fun MapArea(
                 modifier = Modifier.size(20.dp),
             )
         }
+        MapControls(
+            satellite = AppPrefs.satelliteMap,
+            onToggleSatellite = { AppPrefs.saveSatelliteMap(!AppPrefs.satelliteMap) },
+            onLocateMe = {
+                if (!MapBackendProvider.backend.locateMe(context)) {
+                    android.widget.Toast.makeText(context, pendingFeatureHint, android.widget.Toast.LENGTH_SHORT).show()
+                }
+            },
+            onResetNorth = {
+                if (!MapBackendProvider.backend.resetNorth(context)) {
+                    android.widget.Toast.makeText(context, pendingFeatureHint, android.widget.Toast.LENGTH_SHORT).show()
+                }
+            },
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(start = 16.dp, top = 108.dp),
+        )
 
-        // 右上角：扫描状态按钮
+        // ---- 右上角：扫描状态按钮（固定位置、真实状态、不呼吸） ----
+        val scanState = ScannerController.scanState
+        val (statusText, statusColor) = scanStatusInfo(permissionsGranted)
         FrostedPill(
-            onClick = onToggleScanPanel,
+            onClick = { scanPanelVisible = !scanPanelVisible },
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .padding(end = 16.dp, top = 56.dp),
         ) {
-            PulseDot(
-                color = if (ScannerController.scanState.isScanning) colors.success else colors.mutedForeground,
-                size = 8.dp,
-                pulseScale = 2f,
+            // 静态状态点（无脉冲动画）
+            Box(
+                Modifier
+                    .size(8.dp)
+                    .background(statusColor, CircleShape),
             )
             Text(
-                text = stringResource(R.string.scanning),
+                text = statusText,
                 style = DroneTypography.captionMedium,
                 color = colors.foreground,
             )
         }
 
-        // 可展开扫描状态面板
+        // ---- 扫描状态面板：缩放 + 渐变动画，锚定按钮正下方，不遮挡其他内容 ----
         AnimatedVisibility(
             visible = scanPanelVisible,
+            enter = scaleIn(
+                initialScale = 0.85f,
+                transformOrigin = TransformOrigin(1f, 0f),
+            ) + fadeIn(animationSpec = androidx.compose.animation.core.tween(200)),
+            exit = scaleOut(
+                targetScale = 0.85f,
+                transformOrigin = TransformOrigin(1f, 0f),
+            ) + fadeOut(animationSpec = androidx.compose.animation.core.tween(150)),
             modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(start = 16.dp, end = 16.dp, top = 104.dp),
+                .align(Alignment.TopEnd)
+                .padding(end = 16.dp, top = 104.dp),
         ) {
-            ScanStatusPanel()
+            ScanStatusPanel(
+                permissionsGranted = permissionsGranted,
+                onRequestPermissions = {
+                    permissionLauncher.launch(neededPermissions().toTypedArray())
+                },
+                onOpenSearchSettings = onOpenSearchSettings,
+            )
         }
+
+        // ---- 下层：可拖拽 Bottom Sheet ----
+        DroneBottomSheet(
+            drones = ScannerController.drones,
+            onDroneClick = onDroneClick,
+            modifier = Modifier.align(Alignment.BottomCenter),
+        )
     }
 }
 
-/** 扫描状态面板（真实扫描状态） */
+/** 扫描状态按钮的文字与颜色（真实状态，非死代码） */
 @Composable
-private fun ScanStatusPanel() {
+private fun scanStatusInfo(permissionsGranted: Boolean): Pair<String, Color> {
     val colors = LocalDroneColors.current
     val state = ScannerController.scanState
+    return when {
+        !permissionsGranted ->
+            stringResource(R.string.scan_status_perm) to colors.danger
+
+        !AppPrefs.bluetoothScanEnabled && !AppPrefs.wifiScanEnabled ->
+            stringResource(R.string.scan_status_off) to colors.mutedForeground
+
+        state.hasError ->
+            stringResource(R.string.scan_status_error) to colors.warning
+
+        state.isScanning ->
+            stringResource(R.string.scanning) to colors.success
+
+        else ->
+            stringResource(R.string.scan_status_stopped) to colors.mutedForeground
+    }
+}
+
+/** 通道错误描述（蓝牙 / Wi-Fi 错误码独立映射） */
+@Composable
+private fun channelErrorText(isBluetooth: Boolean, errorCode: Int): String = when {
+    isBluetooth && errorCode == ScanState.BT_ERR_UNAVAILABLE -> stringResource(R.string.bt_unavailable)
+    isBluetooth && errorCode == ScanState.BT_ERR_DISABLED -> stringResource(R.string.bt_disabled)
+    !isBluetooth && errorCode == ScanState.WIFI_ERR_UNAVAILABLE -> stringResource(R.string.wifi_unavailable)
+    else -> stringResource(R.string.scan_failed_code, errorCode)
+}
+
+/** 扫描状态面板：真实状态 + 错误解决方案 */
+@Composable
+private fun ScanStatusPanel(
+    permissionsGranted: Boolean,
+    onRequestPermissions: () -> Unit,
+    onOpenSearchSettings: () -> Unit,
+) {
+    val colors = LocalDroneColors.current
+    val state = ScannerController.scanState
+
     Column(
         Modifier
-            .fillMaxWidth()
+            .width(240.dp)
             .clip(RoundedCornerShape(12.dp))
             .background(colors.card)
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+            .padding(horizontal = 14.dp, vertical = 12.dp),
     ) {
-        ScanStatusRow(
+        // 权限不足提示
+        if (!permissionsGranted) {
+            Text(
+                text = stringResource(R.string.scan_status_perm),
+                style = DroneTypography.captionMedium,
+                color = colors.danger,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = stringResource(R.string.scan_panel_solution),
+                style = DroneTypography.label,
+                color = colors.mutedForeground,
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(
+                Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(colors.primary)
+                    .clickable(onClick = onRequestPermissions)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = stringResource(R.string.permission_required),
+                    style = DroneTypography.label,
+                    color = colors.primaryForeground,
+                )
+            }
+            HorizontalDivider(
+                modifier = Modifier.padding(vertical = 10.dp),
+                thickness = 1.dp,
+                color = colors.border,
+            )
+        }
+
+        // Wi-Fi 通道
+        ChannelStatusRow(
             icon = Icons.Filled.Wifi,
-            text = stringResource(R.string.wifi_scanning),
+            isBluetooth = false,
+            label = stringResource(R.string.scan_wifi),
+            enabled = AppPrefs.wifiScanEnabled,
             scanning = state.wifiScanning,
+            errorCode = state.wifiErrorCode,
         )
         HorizontalDivider(
             modifier = Modifier.padding(vertical = 10.dp),
             thickness = 1.dp,
             color = colors.border,
         )
-        ScanStatusRow(
+        // 蓝牙通道
+        ChannelStatusRow(
             icon = Icons.Filled.Bluetooth,
-            text = stringResource(R.string.bluetooth_scanning),
+            isBluetooth = true,
+            label = stringResource(R.string.scan_bluetooth),
+            enabled = AppPrefs.bluetoothScanEnabled,
             scanning = state.bluetoothScanning,
+            errorCode = state.bluetoothErrorCode,
         )
+
+        // 扫描异常：给出解决方案并跳转搜索设置
+        if (state.hasError || !AppPrefs.wifiScanEnabled || !AppPrefs.bluetoothScanEnabled) {
+            HorizontalDivider(
+                modifier = Modifier.padding(vertical = 10.dp),
+                thickness = 1.dp,
+                color = colors.border,
+            )
+            Text(
+                text = stringResource(R.string.scan_panel_solution),
+                style = DroneTypography.label,
+                color = colors.mutedForeground,
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(
+                Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(colors.primary)
+                    .clickable(onClick = onOpenSearchSettings)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = stringResource(R.string.goto_search_settings),
+                    style = DroneTypography.label,
+                    color = colors.primaryForeground,
+                )
+            }
+        }
     }
 }
 
-/** 扫描状态行 */
+/** 单个扫描通道状态行：图标 + 名称 + 状态（扫描中/已关闭/失败原因/未在扫描） */
 @Composable
-private fun ScanStatusRow(icon: androidx.compose.ui.graphics.vector.ImageVector, text: String, scanning: Boolean) {
+private fun ChannelStatusRow(
+    icon: ImageVector,
+    isBluetooth: Boolean,
+    label: String,
+    enabled: Boolean,
+    scanning: Boolean,
+    errorCode: Int?,
+) {
     val colors = LocalDroneColors.current
     Row(
         Modifier.fillMaxWidth(),
@@ -257,20 +418,32 @@ private fun ScanStatusRow(icon: androidx.compose.ui.graphics.vector.ImageVector,
         Icon(
             imageVector = icon,
             contentDescription = null,
-            tint = if (scanning) colors.foreground else colors.mutedForeground,
+            tint = colors.foreground,
             modifier = Modifier.size(16.dp),
         )
         Text(
-            text = text,
+            text = label,
             style = DroneTypography.captionMedium,
-            color = if (scanning) colors.foreground else colors.mutedForeground,
+            color = colors.foreground,
             modifier = Modifier.weight(1f),
         )
-        if (scanning) {
-            ScanningSpinner(size = 14.dp)
-        } else {
-            Text(
-                text = stringResource(R.string.scan_off),
+        when {
+            !enabled -> Text(
+                text = stringResource(R.string.scan_channel_off),
+                style = DroneTypography.label,
+                color = colors.mutedForeground,
+            )
+
+            scanning -> ScanningSpinner(size = 14.dp)
+
+            errorCode != null -> Text(
+                text = channelErrorText(isBluetooth = isBluetooth, errorCode = errorCode),
+                style = DroneTypography.label,
+                color = colors.danger,
+            )
+
+            else -> Text(
+                text = stringResource(R.string.scan_channel_idle),
                 style = DroneTypography.label,
                 color = colors.mutedForeground,
             )
@@ -278,104 +451,154 @@ private fun ScanStatusRow(icon: androidx.compose.ui.graphics.vector.ImageVector,
     }
 }
 
-/** 底部无人机列表面板（含空状态与演示模式标识） */
+/**
+ * 可拖拽无人机列表面板：
+ *  - 收起：常驻屏幕约 1/3（标题 + 数量 + 前几项）
+ *  - 上拉：展开为全屏列表（呼号 / 距离 / 高度）
+ */
 @Composable
-private fun DroneListPanel(
+private fun DroneBottomSheet(
     drones: List<Drone>,
-    isDemoMode: Boolean,
     onDroneClick: (Drone) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val colors = LocalDroneColors.current
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
-            .background(colors.card),
-    ) {
-        // Drag handle
-        Box(
-            Modifier
-                .align(Alignment.CenterHorizontally)
-                .padding(top = 10.dp, bottom = 6.dp)
-                .size(width = 36.dp, height = 5.dp)
-                .background(colors.mutedForeground.copy(alpha = 0.3f), CircleShape),
-        )
+    val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
 
-        // Header
-        Row(
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+        val screenHeight = maxHeight
+        val expandedHeight = screenHeight * 0.85f
+        // 常驻面积：约屏幕 1/3
+        val collapsedHeight = screenHeight * 0.33f
+        val maxDrag = (expandedHeight - collapsedHeight)
+        val maxDragPx = with(density) { maxDrag.toPx() }
+
+        // sheetOffset: 0 = 完全展开；maxDragPx = 收起
+        var sheetOffset by remember { mutableFloatStateOf(maxDragPx) }
+
+        Column(
             Modifier
                 .fillMaxWidth()
-                .padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
+                .height(expandedHeight)
+                .offset { IntOffset(0, sheetOffset.roundToInt()) }
+                .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+                .background(colors.card)
+                .draggable(
+                    orientation = Orientation.Vertical,
+                    state = rememberDraggableState { delta ->
+                        sheetOffset = (sheetOffset + delta).coerceIn(0f, maxDragPx)
+                    },
+                    onDragStopped = { velocity ->
+                        val target = when {
+                            velocity > 800f -> maxDragPx
+                            velocity < -800f -> 0f
+                            sheetOffset > maxDragPx / 2 -> maxDragPx
+                            else -> 0f
+                        }
+                        scope.launch {
+                            animate(
+                                initialValue = sheetOffset,
+                                targetValue = target,
+                                animationSpec = spring(),
+                            ) { value, _ ->
+                                sheetOffset = value
+                            }
+                        }
+                    },
+                ),
         ) {
-            Text(
-                text = stringResource(R.string.detected_drones),
-                style = DroneTypography.pageTitle.copy(fontWeight = FontWeight.Bold),
-                color = colors.foreground,
-                modifier = Modifier.weight(1f),
-            )
-            if (isDemoMode) {
-                Text(
-                    text = stringResource(R.string.demo_badge),
-                    style = DroneTypography.label,
-                    color = colors.warning,
-                    modifier = Modifier
-                        .padding(end = 8.dp)
-                        .clip(RoundedCornerShape(50))
-                        .background(colors.warning.copy(alpha = 0.15f))
-                        .padding(horizontal = 8.dp, vertical = 2.dp),
-                )
-            }
+            // Drag handle
             Box(
                 Modifier
-                    .background(colors.primary, RoundedCornerShape(50))
-                    .padding(horizontal = 10.dp, vertical = 2.dp),
-            ) {
-                Text(
-                    text = "${drones.size}",
-                    style = DroneTypography.label,
-                    color = colors.primaryForeground,
-                )
-            }
-        }
+                    .align(Alignment.CenterHorizontally)
+                    .padding(top = 10.dp, bottom = 6.dp)
+                    .size(width = 36.dp, height = 5.dp)
+                    .background(colors.mutedForeground.copy(alpha = 0.3f), CircleShape),
+            )
 
-        // 列表 / 空状态
-        if (drones.isEmpty()) {
-            Column(
+            // Header：标题 + 数量（演示模式显示"演示"标签）
+            Row(
                 Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
+                    .padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = stringResource(R.string.empty_drones),
-                    style = DroneTypography.body,
+                    text = stringResource(R.string.detected_drones),
+                    style = DroneTypography.pageTitle.copy(fontWeight = FontWeight.Bold),
                     color = colors.foreground,
+                    modifier = Modifier.weight(1f),
                 )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = stringResource(R.string.empty_drones_hint),
-                    style = DroneTypography.label,
-                    color = colors.mutedForeground,
-                )
+                if (AppPrefs.demoMode) {
+                    Text(
+                        text = stringResource(R.string.demo_badge),
+                        style = DroneTypography.label,
+                        color = colors.warning,
+                        modifier = Modifier
+                            .padding(end = 8.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(colors.warning.copy(alpha = 0.15f))
+                            .padding(horizontal = 8.dp, vertical = 2.dp),
+                    )
+                }
+                Box(
+                    Modifier
+                        .background(colors.primary, RoundedCornerShape(50))
+                        .padding(horizontal = 10.dp, vertical = 2.dp),
+                ) {
+                    Text(
+                        text = "${drones.size}",
+                        style = DroneTypography.label,
+                        color = colors.primaryForeground,
+                    )
+                }
             }
-        } else {
-            LazyColumn(
-                modifier = Modifier.heightIn(max = 240.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                contentPadding = PaddingValues(bottom = 12.dp),
-            ) {
-                items(drones, key = { it.id }) { drone ->
-                    DroneListItem(drone = drone, onClick = { onDroneClick(drone) })
+
+            // 列表（收起时可见前几项）
+            if (drones.isEmpty()) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(
+                        text = stringResource(R.string.empty_drones),
+                        style = DroneTypography.body,
+                        color = colors.foreground,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = stringResource(R.string.empty_drones_hint),
+                        style = DroneTypography.label,
+                        color = colors.mutedForeground,
+                    )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .weight(1f)
+                        .navigationBarsPadding(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 12.dp),
+                ) {
+                    items(drones, key = { it.id }) { drone ->
+                        DroneListItem(
+                            drone = drone,
+                            onClick = { onDroneClick(drone) },
+                            modifier = Modifier.animateItem(),
+                        )
+                    }
                 }
             }
         }
     }
 }
 
-/** 无人机列表项 */
+/** 无人机列表项：状态点 + 呼号 + 距离/高度 */
 @Composable
-private fun DroneListItem(drone: Drone, onClick: () -> Unit) {
+private fun DroneListItem(drone: Drone, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val colors = LocalDroneColors.current
     val statusColor = when (drone.status) {
         DroneStatus.SAFE -> colors.success
@@ -383,15 +606,15 @@ private fun DroneListItem(drone: Drone, onClick: () -> Unit) {
         DroneStatus.DANGER -> colors.danger
     }
     val auxInfo = listOf(
-        drone.heightM?.let { "${formatNumber(it)}m" } ?: "—",
-        drone.distanceM?.let { "${formatNumber(it)}m" } ?: "—",
-        drone.operatorDistanceM?.let { stringResource(R.string.operator_distance_format, it) } ?: "—",
+        drone.distanceM?.let { stringResource(R.string.distance_format, formatNumber(it)) } ?: "—",
+        drone.heightAboveTakeoffM?.let { stringResource(R.string.altitude_format, formatNumber(it)) }
+            ?: drone.geodeticAltitudeM?.let { stringResource(R.string.altitude_format, formatNumber(it)) }
+            ?: "—",
     ).joinToString(" · ")
     val timeAgo = stringResource(R.string.time_ago_format, drone.lastSeenSeconds)
 
     Row(
-        Modifier
-            .padding(horizontal = 16.dp)
+        modifier
             .clip(RoundedCornerShape(12.dp))
             .background(colors.muted)
             .clickable(onClick = onClick)
@@ -458,6 +681,6 @@ internal fun formatNumber(value: Float): String =
 @Composable
 private fun MapHomeScreenPreview() {
     com.global_707.drone_scanner.ui.theme.DroneScannerTheme {
-        MapHomeScreen(onOpenSettings = {}, onDroneClick = {})
+        MapHomeScreen(onOpenSettings = {}, onOpenSearchSettings = {}, onDroneClick = {})
     }
 }

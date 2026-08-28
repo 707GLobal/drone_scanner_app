@@ -1,10 +1,10 @@
 package com.global_707.drone_scanner.ui.screens
 
-import android.content.Intent
-import android.net.Uri
+import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -18,46 +18,74 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bluetooth
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.global_707.drone_scanner.BuildConfig
 import com.global_707.drone_scanner.R
 import com.global_707.drone_scanner.data.AppPrefs
+import com.global_707.drone_scanner.data.DeviceCapabilities
+import com.global_707.drone_scanner.data.ScanPriority
 import com.global_707.drone_scanner.data.ScannerController
-import com.global_707.drone_scanner.ui.components.ScanningSpinner
+import com.global_707.drone_scanner.ui.components.RadarGlyph
 import com.global_707.drone_scanner.ui.components.SectionCard
 import com.global_707.drone_scanner.ui.theme.DroneTypography
 import com.global_707.drone_scanner.ui.theme.LocalDroneColors
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import org.json.JSONObject
-import java.net.HttpURLConnection
-import java.net.URL
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 
-// ============ 搜索设置 ============
+// ============ 搜索设置（蓝牙 / Wi-Fi 分组 + 实时能力状态 + 扫描优先级） ============
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SearchSettingsScreen(onBack: () -> Unit) {
     val colors = LocalDroneColors.current
     val context = LocalContext.current
+
+    // 设备能力实时读取：每 2 秒重新查询系统 API（蓝牙/Wi-Fi 开关变化后自动更新）
+    val bt4Supported by produceState(initialValue = DeviceCapabilities.bluetooth4Legacy(context)) {
+        while (isActive) {
+            value = DeviceCapabilities.bluetooth4Legacy(context)
+            delay(2000)
+        }
+    }
+    val bt5Supported by produceState(initialValue = DeviceCapabilities.bluetooth5Extended(context)) {
+        while (isActive) {
+            value = DeviceCapabilities.bluetooth5Extended(context)
+            delay(2000)
+        }
+    }
+    val wifiNanSupported by produceState(initialValue = DeviceCapabilities.wifiNanSupported(context)) {
+        while (isActive) {
+            value = DeviceCapabilities.wifiNanSupported(context)
+            delay(2000)
+        }
+    }
 
     Column(
         Modifier
@@ -69,121 +97,238 @@ fun SearchSettingsScreen(onBack: () -> Unit) {
             Modifier
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
-                .padding(16.dp),
+                .padding(horizontal = 16.dp, vertical = 16.dp),
         ) {
-            SettingGroup {
-                SwitchSettingRow(
-                    label = stringResource(R.string.enable_wifi_scan),
+            // ---- 蓝牙扫描 ----
+            GroupTitle(title = stringResource(R.string.scan_group_bluetooth))
+            Spacer(Modifier.height(12.dp))
+            SectionCard {
+                FeatureRow(
+                    icon = Icons.Filled.Bluetooth,
+                    label = stringResource(R.string.scan_bluetooth),
+                    checked = AppPrefs.bluetoothScanEnabled,
+                    onCheckedChange = { value ->
+                        AppPrefs.saveBluetoothScanEnabled(value)
+                        ScannerController.restart(context)
+                    },
+                )
+                Spacer(Modifier.height(14.dp))
+                CapabilityStatusRow(
+                    supported = bt4Supported,
+                    title = stringResource(R.string.bt4_legacy_supported),
+                    description = stringResource(R.string.bt4_legacy_desc),
+                )
+                Spacer(Modifier.height(14.dp))
+                CapabilityStatusRow(
+                    supported = bt5Supported,
+                    title = stringResource(R.string.bt5_extended_supported),
+                    description = stringResource(R.string.bt5_extended_desc),
+                )
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            // 扫描优先级（M3 原生下拉，修改后立即重启扫描）
+            SectionCard {
+                ScanPrioritySelector()
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    text = stringResource(
+                        R.string.scan_mode_current,
+                        stringResource(
+                            when (AppPrefs.scanPriority) {
+                                ScanPriority.LOW -> R.string.scan_mode_low_power
+                                ScanPriority.NORMAL -> R.string.scan_mode_balanced
+                                else -> R.string.scan_mode_low_latency
+                            },
+                        ),
+                    ),
+                    style = DroneTypography.label,
+                    color = colors.mutedForeground,
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = stringResource(R.string.scan_priority_desc),
+                    style = DroneTypography.caption,
+                    color = colors.mutedForeground,
+                )
+            }
+
+            Spacer(Modifier.height(24.dp))
+
+            // ---- Wi-Fi 扫描 ----
+            GroupTitle(title = stringResource(R.string.scan_group_wifi))
+            Spacer(Modifier.height(12.dp))
+            SectionCard {
+                FeatureRow(
+                    icon = Icons.Filled.Wifi,
+                    label = stringResource(R.string.scan_wifi),
                     checked = AppPrefs.wifiScanEnabled,
                     onCheckedChange = { value ->
                         AppPrefs.saveWifiScanEnabled(value)
                         ScannerController.restart(context)
                     },
                 )
-                SwitchSettingRow(
-                    label = stringResource(R.string.enable_bt_scan),
-                    checked = AppPrefs.bluetoothScanEnabled,
-                    onCheckedChange = { value ->
-                        AppPrefs.saveBluetoothScanEnabled(value)
-                        ScannerController.restart(context)
+                Spacer(Modifier.height(14.dp))
+                CapabilityStatusRow(
+                    supported = wifiNanSupported,
+                    title = if (wifiNanSupported) {
+                        stringResource(R.string.wifi_nan_supported)
+                    } else {
+                        stringResource(R.string.wifi_nan_not_supported)
                     },
-                    showDivider = false,
-                )
-            }
-            Spacer(Modifier.height(16.dp))
-            SettingGroup {
-                SwitchSettingRow(
-                    label = stringResource(R.string.demo_mode),
-                    subtitle = stringResource(R.string.demo_mode_desc),
-                    checked = AppPrefs.demoMode,
-                    onCheckedChange = { value ->
-                        AppPrefs.saveDemoMode(value)
-                        ScannerController.refresh()
-                    },
-                    showDivider = false,
+                    description = stringResource(R.string.wifi_nan_desc),
                 )
             }
         }
     }
 }
 
-// ============ 地图设置 ============
-
+/** 分组标题（参考原型图：标题 + 贯穿下划线） */
 @Composable
-fun MapSettingsScreen(onBack: () -> Unit) {
+private fun GroupTitle(title: String) {
     val colors = LocalDroneColors.current
+    Column {
+        Text(
+            text = title,
+            style = DroneTypography.pageTitle.copy(fontWeight = FontWeight.SemiBold),
+            color = colors.foreground,
+        )
+        Spacer(Modifier.height(4.dp))
+        HorizontalDivider(thickness = 2.dp, color = colors.primary.copy(alpha = 0.35f))
+    }
+}
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .background(colors.background),
+/** 特性行：图标方块 + 名称 + 开关 */
+@Composable
+private fun FeatureRow(
+    icon: ImageVector,
+    label: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    val colors = LocalDroneColors.current
+    Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        HeaderBar(title = stringResource(R.string.map_settings), onBack = onBack)
-        Column(
+        Box(
             Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
+                .size(52.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(colors.primary.copy(alpha = 0.12f)),
+            contentAlignment = Alignment.Center,
         ) {
-            SettingGroup {
-                // 地图类型选择
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = stringResource(R.string.map_type),
-                        style = DroneTypography.body,
-                        color = colors.foreground,
-                        modifier = Modifier.weight(1f),
-                    )
-                    MapTypeChip(
-                        label = stringResource(R.string.map_standard),
-                        selected = !AppPrefs.satelliteMap,
-                        onClick = { AppPrefs.saveSatelliteMap(false) },
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    MapTypeChip(
-                        label = stringResource(R.string.map_satellite),
-                        selected = AppPrefs.satelliteMap,
-                        onClick = { AppPrefs.saveSatelliteMap(true) },
-                    )
-                }
-                HorizontalDivider(
-                    modifier = Modifier.padding(start = 16.dp),
-                    thickness = 1.dp,
-                    color = colors.border,
-                )
-                SwitchSettingRow(
-                    label = stringResource(R.string.show_operator_markers),
-                    checked = AppPrefs.showOperatorMarkers,
-                    onCheckedChange = { AppPrefs.saveShowOperatorMarkers(it) },
-                    showDivider = false,
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = colors.primary,
+                modifier = Modifier.size(26.dp),
+            )
+        }
+        Spacer(Modifier.width(14.dp))
+        Text(
+            text = label,
+            style = DroneTypography.body,
+            color = colors.foreground,
+            modifier = Modifier.weight(1f),
+        )
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(
+                checkedTrackColor = colors.primary,
+                uncheckedTrackColor = colors.muted,
+                uncheckedThumbColor = colors.card,
+            ),
+        )
+    }
+}
+
+/** 能力状态行：✓ / ✗ 图标 + 标题 + 说明（实时检测结果） */
+@Composable
+private fun CapabilityStatusRow(supported: Boolean, title: String, description: String) {
+    val colors = LocalDroneColors.current
+    Row {
+        Icon(
+            imageVector = if (supported) Icons.Filled.CheckCircle else Icons.Filled.Close,
+            contentDescription = null,
+            tint = if (supported) colors.success else colors.danger,
+            modifier = Modifier.size(22.dp),
+        )
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = DroneTypography.body,
+                color = colors.foreground,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = description,
+                style = DroneTypography.label,
+                color = colors.mutedForeground,
+            )
+        }
+    }
+}
+
+/** 扫描优先级：M3 原生 ExposedDropdownMenuBox（选项菜单跟随右侧控件弹出） */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ScanPrioritySelector() {
+    val colors = LocalDroneColors.current
+    val context = LocalContext.current
+    var expanded by remember { mutableStateOf(false) }
+    val priorityLabel = when (AppPrefs.scanPriority) {
+        ScanPriority.LOW -> stringResource(R.string.scan_priority_low)
+        ScanPriority.NORMAL -> stringResource(R.string.scan_priority_normal)
+        else -> stringResource(R.string.scan_priority_high)
+    }
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = it },
+    ) {
+        OutlinedTextField(
+            value = priorityLabel,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text(stringResource(R.string.scan_priority)) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = colors.primary,
+                unfocusedBorderColor = colors.border,
+                focusedLabelColor = colors.primary,
+                cursorColor = colors.primary,
+            ),
+            modifier = Modifier
+                .menuAnchor(androidx.compose.material3.MenuAnchorType.PrimaryNotEditable)
+                .fillMaxWidth(),
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            listOf(
+                ScanPriority.LOW to stringResource(R.string.scan_priority_low),
+                ScanPriority.NORMAL to stringResource(R.string.scan_priority_normal),
+                ScanPriority.HIGH to stringResource(R.string.scan_priority_high),
+            ).forEach { (value, label) ->
+                DropdownMenuItem(
+                    text = { Text(label) },
+                    onClick = {
+                        AppPrefs.saveScanPriority(value)
+                        ScannerController.restart(context)
+                        expanded = false
+                    },
                 )
             }
         }
     }
 }
 
-/** 地图类型选择胶囊 */
-@Composable
-private fun MapTypeChip(label: String, selected: Boolean, onClick: () -> Unit) {
-    val colors = LocalDroneColors.current
-    Text(
-        text = label,
-        style = DroneTypography.caption,
-        color = if (selected) colors.primaryForeground else colors.foreground,
-        modifier = Modifier
-            .clip(RoundedCornerShape(50))
-            .background(if (selected) colors.primary else colors.muted)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-    )
-}
-
-// ============ 显示设置 ============
+// ============ 显示设置（仅保留 Keep Screen On） ============
 
 @Composable
 fun DisplaySettingsScreen(onBack: () -> Unit) {
@@ -201,24 +346,38 @@ fun DisplaySettingsScreen(onBack: () -> Unit) {
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp),
         ) {
-            SettingGroup {
-                SwitchSettingRow(
-                    label = stringResource(R.string.show_name_labels),
-                    checked = AppPrefs.showNameLabels,
-                    onCheckedChange = { AppPrefs.saveShowNameLabels(it) },
-                    showDivider = false,
-                )
+            SectionCard {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = stringResource(R.string.keep_screen_on),
+                        style = DroneTypography.body,
+                        color = colors.foreground,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Switch(
+                        checked = AppPrefs.keepScreenOn,
+                        onCheckedChange = { AppPrefs.saveKeepScreenOn(it) },
+                        colors = SwitchDefaults.colors(
+                            checkedTrackColor = colors.primary,
+                            uncheckedTrackColor = colors.muted,
+                            uncheckedThumbColor = colors.card,
+                        ),
+                    )
+                }
             }
         }
     }
 }
 
-// ============ 关于我们 ============
+// ============ 关于我们（含演示模式开关 + 版本信息在页面底部） ============
 
 @Composable
 fun AboutScreen(onBack: () -> Unit) {
     val colors = LocalDroneColors.current
-    val context = LocalContext.current
+    val context: Context = LocalContext.current
     val githubUrl = "https://github.com/707GLobal/drone_scanner_app"
 
     Column(
@@ -234,35 +393,86 @@ fun AboutScreen(onBack: () -> Unit) {
                 .padding(16.dp),
         ) {
             SectionCard {
-                Text(
-                    text = stringResource(R.string.app_name),
-                    style = DroneTypography.largeTitle,
-                    color = colors.foreground,
-                )
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    text = stringResource(R.string.app_version),
-                    style = DroneTypography.caption,
-                    color = colors.mutedForeground,
-                )
-                Spacer(Modifier.height(12.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    RadarGlyph(
+                        color = colors.primary,
+                        modifier = Modifier.size(40.dp),
+                    )
+                    Spacer(Modifier.width(14.dp))
+                    Column {
+                        Text(
+                            text = stringResource(R.string.app_name),
+                            style = DroneTypography.largeTitle,
+                            color = colors.foreground,
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = stringResource(R.string.about_static_note),
+                            style = DroneTypography.caption,
+                            color = colors.mutedForeground,
+                        )
+                    }
+                }
+                Spacer(Modifier.height(14.dp))
                 Text(
                     text = stringResource(R.string.about_desc),
                     style = DroneTypography.caption,
                     color = colors.mutedForeground,
                 )
             }
+
             Spacer(Modifier.height(16.dp))
-            SettingGroup {
+
+            // 演示模式（原设置入口移至此页）
+            SectionCard {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = stringResource(R.string.demo_mode),
+                            style = DroneTypography.body,
+                            color = colors.foreground,
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = stringResource(R.string.demo_mode_desc),
+                            style = DroneTypography.label,
+                            color = colors.mutedForeground,
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Switch(
+                        checked = AppPrefs.demoMode,
+                        onCheckedChange = { value ->
+                            AppPrefs.saveDemoMode(value)
+                            ScannerController.refresh()
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedTrackColor = colors.primary,
+                            uncheckedTrackColor = colors.muted,
+                            uncheckedThumbColor = colors.card,
+                        ),
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            SectionCard {
                 Row(
                     Modifier
                         .fillMaxWidth()
                         .clickable {
                             context.startActivity(
-                                Intent(Intent.ACTION_VIEW, Uri.parse(githubUrl)),
+                                android.content.Intent(
+                                    android.content.Intent.ACTION_VIEW,
+                                    android.net.Uri.parse(githubUrl),
+                                ),
                             )
                         }
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                        .padding(vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
@@ -279,179 +489,17 @@ fun AboutScreen(onBack: () -> Unit) {
                     )
                 }
             }
-        }
-    }
-}
 
-// ============ 检查更新 ============
-
-@Composable
-fun CheckUpdateScreen(onBack: () -> Unit) {
-    val colors = LocalDroneColors.current
-    val scope = rememberCoroutineScope()
-    var loading by remember { mutableStateOf(false) }
-    var resultText by remember { mutableStateOf<String?>(null) }
-    var isLatest by remember { mutableStateOf(false) }
-    val checking = stringResource(R.string.checking_update)
-    val latest = stringResource(R.string.update_latest)
-    val failed = stringResource(R.string.update_failed)
-
-    Column(
-        Modifier
-            .fillMaxSize()
-            .background(colors.background),
-    ) {
-        HeaderBar(title = stringResource(R.string.check_update), onBack = onBack)
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-        ) {
-            SectionCard {
-                Text(
-                    text = stringResource(R.string.current_version, BuildConfig.VERSION_NAME),
-                    style = DroneTypography.body,
-                    color = colors.foreground,
-                )
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    text = when {
-                        loading -> checking
-                        resultText != null -> resultText!!
-                        isLatest -> latest
-                        else -> ""
-                    },
-                    style = DroneTypography.caption,
-                    color = if (isLatest) colors.success else colors.mutedForeground,
-                )
-                Spacer(Modifier.height(16.dp))
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    if (loading) {
-                        ScanningSpinner(size = 16.dp)
-                    }
-                    Text(
-                        text = stringResource(R.string.check_update),
-                        style = DroneTypography.captionMedium,
-                        color = colors.primary,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(colors.primary.copy(alpha = 0.12f))
-                            .clickable {
-                                if (!loading) {
-                                    loading = true
-                                    resultText = null
-                                    scope.launch {
-                                        val (text, latestResult) = withContext(Dispatchers.IO) { fetchLatestRelease() }
-                                        resultText = text
-                                        isLatest = latestResult
-                                        loading = false
-                                    }
-                                }
-                            }
-                            .padding(horizontal = 16.dp, vertical = 10.dp),
-                    )
-                }
-            }
-        }
-    }
-}
-
-/** 查询 GitHub Releases 最新版本；返回 (展示文案, 是否为最新) */
-private fun fetchLatestRelease(): Pair<String, Boolean> {
-    return try {
-        val conn = URL("https://api.github.com/repos/707GLobal/drone_scanner_app/releases/latest")
-            .openConnection() as HttpURLConnection
-        conn.connectTimeout = 8000
-        conn.readTimeout = 8000
-        conn.requestMethod = "GET"
-        conn.setRequestProperty("Accept", "application/vnd.github+json")
-        if (conn.responseCode == 200) {
-            val body = conn.inputStream.bufferedReader().use { it.readText() }
-            val tag = JSONObject(body).optString("tag_name")
-            val latestTag = tag.removePrefix("v")
-            if (latestTag.isNotBlank() && latestTag != BuildConfig.VERSION_NAME) {
-                "发现新版本 v$latestTag" to false
-            } else {
-                "当前 v${BuildConfig.VERSION_NAME} 已是最新版本" to true
-            }
-        } else {
-            "检查更新失败（HTTP ${conn.responseCode}）" to false
-        }
-    } catch (_: Exception) {
-        "检查更新失败，请检查网络" to false
-    }
-}
-
-// ============ 通用设置组件 ============
-
-/** 设置分组卡片 */
-@Composable
-private fun SettingGroup(
-    modifier: Modifier = Modifier,
-    content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit,
-) {
-    val colors = LocalDroneColors.current
-    Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(16.dp))
-            .background(colors.card),
-        content = content,
-    )
-}
-
-/** 开关设置行 */
-@Composable
-private fun SwitchSettingRow(
-    label: String,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-    subtitle: String? = null,
-    showDivider: Boolean = true,
-) {
-    val colors = LocalDroneColors.current
-    Column {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    text = label,
-                    style = DroneTypography.body,
-                    color = colors.foreground,
-                )
-                if (subtitle != null) {
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        text = subtitle,
-                        style = DroneTypography.label,
-                        color = colors.mutedForeground,
-                    )
-                }
-            }
-            Spacer(Modifier.width(8.dp))
-            Switch(
-                checked = checked,
-                onCheckedChange = onCheckedChange,
-                colors = SwitchDefaults.colors(
-                    checkedTrackColor = colors.primary,
-                    uncheckedTrackColor = colors.muted,
-                    uncheckedThumbColor = colors.card,
-                ),
-            )
-        }
-        if (showDivider) {
-            HorizontalDivider(
-                modifier = Modifier.padding(start = 16.dp),
-                thickness = 1.dp,
-                color = colors.border,
+            Spacer(Modifier.height(24.dp))
+            // 版本信息：仅展示在关于我们页面底部
+            Text(
+                text = stringResource(R.string.app_version),
+                style = DroneTypography.label,
+                color = colors.mutedForeground,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
             )
         }
     }

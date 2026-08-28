@@ -19,6 +19,10 @@ android {
         versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // 高德地图 API Key（在用户级 ~/.gradle/gradle.properties 配置 amapApiKey=你的Key）
+        manifestPlaceholders["AMAP_API_KEY"] =
+            (project.findProperty("amapApiKey") as String?) ?: "YOUR_AMAP_API_KEY"
     }
 
     buildFeatures {
@@ -55,6 +59,9 @@ dependencies {
     implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.androidx.activity.compose)
     debugImplementation(libs.androidx.compose.ui.tooling)
+
+    // 高德地图 3D SDK
+    implementation(libs.amap3dmap)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.espresso.core)
