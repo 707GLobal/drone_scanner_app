@@ -39,7 +39,14 @@ import com.global_707.drone_scanner.ui.theme.LocalDroneColors
  * 页面三：设置（Settings，参考设计文档第 6 节）
  */
 @Composable
-fun SettingsScreen(onBack: () -> Unit) {
+fun SettingsScreen(
+    onBack: () -> Unit,
+    onSearchSettings: () -> Unit = {},
+    onMapSettings: () -> Unit = {},
+    onDisplaySettings: () -> Unit = {},
+    onAbout: () -> Unit = {},
+    onCheckUpdate: () -> Unit = {},
+) {
     val colors = LocalDroneColors.current
 
     Column(
@@ -62,19 +69,19 @@ fun SettingsScreen(onBack: () -> Unit) {
 
             // 第一组：检测设置
             SettingGroup(Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp)) {
-                SettingRow(label = stringResource(R.string.search_settings), onClick = {})
-                SettingRow(label = stringResource(R.string.map_settings), onClick = {})
-                SettingRow(label = stringResource(R.string.display_settings), onClick = {}, showDivider = false)
+                SettingRow(label = stringResource(R.string.search_settings), onClick = onSearchSettings)
+                SettingRow(label = stringResource(R.string.map_settings), onClick = onMapSettings)
+                SettingRow(label = stringResource(R.string.display_settings), onClick = onDisplaySettings, showDivider = false)
             }
 
             // 第二组：关于
             SettingGroup(Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp)) {
-                SettingRow(label = stringResource(R.string.about_us), onClick = {})
+                SettingRow(label = stringResource(R.string.about_us), onClick = onAbout)
                 SettingRow(
                     label = stringResource(R.string.check_update),
                     trailingText = stringResource(R.string.latest_version),
                     trailingColor = colors.success,
-                    onClick = {},
+                    onClick = onCheckUpdate,
                     showDivider = false,
                 )
             }
@@ -180,5 +187,13 @@ private fun SettingRow(
                 color = colors.border,
             )
         }
+    }
+}
+
+@androidx.compose.ui.tooling.preview.Preview(showBackground = true, widthDp = 375, heightDp = 812)
+@Composable
+private fun SettingsScreenPreview() {
+    com.global_707.drone_scanner.ui.theme.DroneScannerTheme {
+        SettingsScreen(onBack = {})
     }
 }

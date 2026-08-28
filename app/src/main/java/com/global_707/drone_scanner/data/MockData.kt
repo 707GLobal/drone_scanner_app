@@ -1,17 +1,5 @@
 package com.global_707.drone_scanner.data
 
-/**
- * 地图标记位置（归一化 0..1 坐标）。
- * 依据设计稿 375dp 宽 / 452dp 高地图换算：
- * 无人机标记 18dp、飞手标记 12dp，位置见设计文档第 4.2 节。
- */
-data class MapMarker(
-    val droneX: Float,
-    val droneY: Float,
-    val operatorX: Float? = null,
-    val operatorY: Float? = null,
-)
-
 object MockData {
 
     val drones = listOf(
@@ -77,22 +65,6 @@ object MockData {
             operatorDistanceM = 95,
             lastSeenSeconds = 25,
             status = DroneStatus.DANGER,
-        ),
-    )
-
-    /** 与 [drones] 一一对应的地图标记位置 */
-    val markers = listOf(
-        MapMarker(
-            droneX = 95f / 375f, droneY = 130f / 452f,
-            operatorX = 70f / 375f, operatorY = 158f / 452f,
-        ),
-        MapMarker(
-            droneX = 240f / 375f, droneY = 90f / 452f,
-            operatorX = 268f / 375f, operatorY = 115f / 452f,
-        ),
-        MapMarker(
-            droneX = 180f / 375f, droneY = 290f / 452f,
-            operatorX = null, operatorY = null,
         ),
     )
 

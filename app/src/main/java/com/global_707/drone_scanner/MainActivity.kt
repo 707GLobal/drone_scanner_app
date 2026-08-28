@@ -11,15 +11,22 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import com.global_707.drone_scanner.data.AppPrefs
 import com.global_707.drone_scanner.data.MockData
+import com.global_707.drone_scanner.ui.screens.AboutScreen
+import com.global_707.drone_scanner.ui.screens.CheckUpdateScreen
+import com.global_707.drone_scanner.ui.screens.DisplaySettingsScreen
 import com.global_707.drone_scanner.ui.screens.DroneDetailScreen
 import com.global_707.drone_scanner.ui.screens.MapHomeScreen
+import com.global_707.drone_scanner.ui.screens.MapSettingsScreen
+import com.global_707.drone_scanner.ui.screens.SearchSettingsScreen
 import com.global_707.drone_scanner.ui.screens.SettingsScreen
 import com.global_707.drone_scanner.ui.theme.DroneScannerTheme
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AppPrefs.init(applicationContext)
         enableEdgeToEdge()
         setContent {
             DroneScannerTheme {
@@ -29,7 +36,11 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/** 应用根导航：地图主页 / 无人机详情 / 设置（参考设计文档第 10 节） */
+/**
+ * 应用根导航：
+ * 地图主页 → 无人机详情 / 设置
+ * 设置 → 搜索设置 / 地图设置 / 显示设置 / 关于我们 / 检查更新
+ */
 @Composable
 private fun DroneScannerApp() {
     var route by rememberSaveable { mutableStateOf("map") }
@@ -56,7 +67,39 @@ private fun DroneScannerApp() {
 
         "settings" -> {
             BackHandler { route = "map" }
-            SettingsScreen(onBack = { route = "map" })
+            SettingsScreen(
+                onBack = { route = "map" },
+                onSearchSettings = { route = "settings/search" },
+                onMapSettings = { route = "settings/map" },
+                onDisplaySettings = { route = "settings/display" },
+                onAbout = { route = "settings/about" },
+                onCheckUpdate = { route = "settings/update" },
+            )
+        }
+
+        "settings/search" -> {
+            BackHandler { route = "settings" }
+            SearchSettingsScreen(onBack = { route = "settings" })
+        }
+
+        "settings/map" -> {
+            BackHandler { route = "settings" }
+            MapSettingsScreen(onBack = { route = "settings" })
+        }
+
+        "settings/display" -> {
+            BackHandler { route = "settings" }
+            DisplaySettingsScreen(onBack = { route = "settings" })
+        }
+
+        "settings/about" -> {
+            BackHandler { route = "settings" }
+            AboutScreen(onBack = { route = "settings" })
+        }
+
+        "settings/update" -> {
+            BackHandler { route = "settings" }
+            CheckUpdateScreen(onBack = { route = "settings" })
         }
     }
 }

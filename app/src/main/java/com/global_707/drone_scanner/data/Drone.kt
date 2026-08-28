@@ -18,9 +18,12 @@ data class Drone(
     val name: String,
     val snCode: String,
     val ridCode: String,
-    val heightM: Float,
-    val distanceM: Float,
-    val speedMs: Float,
+    /** 高度（米），未知为 null */
+    val heightM: Float?,
+    /** 距离（米），未知为 null */
+    val distanceM: Float?,
+    /** 速度（米/秒），未知为 null */
+    val speedMs: Float?,
     /** 信号强度 0..4 */
     val signalStrength: Int,
     val protocol: String,
@@ -31,8 +34,8 @@ data class Drone(
     val operatorLng: Double?,
     val operatorId: String?,
     val operatorPhone: String?,
-    /** 飞手距离（米），用于列表辅助信息 */
-    val operatorDistanceM: Int,
+    /** 飞手距离（米），未知为 null */
+    val operatorDistanceM: Int?,
     val lastSeenSeconds: Int,
     val status: DroneStatus,
 )

@@ -229,21 +229,21 @@ private fun MetricsGrid(drone: Drone) {
     ) {
         MetricCard(
             label = stringResource(R.string.metric_height),
-            value = formatNumber(drone.heightM),
+            value = drone.heightM?.let { formatNumber(it) } ?: "—",
             unit = stringResource(R.string.unit_m),
             icon = Icons.Filled.ArrowUpward,
             modifier = Modifier.weight(1f),
         )
         MetricCard(
             label = stringResource(R.string.metric_distance),
-            value = formatNumber(drone.distanceM),
+            value = drone.distanceM?.let { formatNumber(it) } ?: "—",
             unit = stringResource(R.string.unit_m),
             icon = Icons.Filled.MyLocation,
             modifier = Modifier.weight(1f),
         )
         MetricCard(
             label = stringResource(R.string.metric_speed),
-            value = formatNumber(drone.speedMs),
+            value = drone.speedMs?.let { formatNumber(it) } ?: "—",
             unit = stringResource(R.string.unit_ms),
             icon = Icons.Filled.Bolt,
             modifier = Modifier.weight(1f),
@@ -574,5 +574,13 @@ private fun OperatorRow(label: String, value: String, showDivider: Boolean) {
         if (showDivider) {
             HorizontalDivider(thickness = 1.dp, color = colors.border)
         }
+    }
+}
+
+@androidx.compose.ui.tooling.preview.Preview(showBackground = true, widthDp = 375, heightDp = 812)
+@Composable
+private fun DroneDetailScreenPreview() {
+    com.global_707.drone_scanner.ui.theme.DroneScannerTheme {
+        DroneDetailScreen(drone = com.global_707.drone_scanner.data.MockData.drones.first(), onBack = {})
     }
 }

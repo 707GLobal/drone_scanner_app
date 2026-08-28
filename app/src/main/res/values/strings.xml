@@ -5,7 +5,13 @@
     <string name="scanning">扫描中</string>
     <string name="wifi_scanning">WiFi 2.4GHz 扫描中…</string>
     <string name="bluetooth_scanning">蓝牙 扫描中…</string>
+    <string name="scan_off">已关闭</string>
+    <string name="permission_required">需授权扫描权限</string>
     <string name="detected_drones">已检测无人机</string>
+    <string name="demo_badge">演示</string>
+    <string name="empty_drones">未检测到无人机</string>
+    <string name="empty_drones_hint">正在扫描附近 RID 信号，检测到设备后会显示在这里</string>
+    <string name="map_placeholder_hint">地图占位\n接入真实地图 SDK 后自动替换</string>
     <string name="operator_distance_format">飞手距%1$dm</string>
     <string name="time_ago_format">%1$ds前</string>
 
@@ -45,4 +51,19 @@
     <string name="check_update">检查更新</string>
     <string name="latest_version">v1.0.0 已是最新版本</string>
     <string name="app_version">v1.0.0</string>
+    <string name="current_version">当前版本 v%1$s</string>
+    <string name="enable_wifi_scan">启用 WiFi 扫描</string>
+    <string name="enable_bt_scan">启用蓝牙扫描</string>
+    <string name="demo_mode">演示模式</string>
+    <string name="demo_mode_desc">无检测结果时显示示例数据</string>
+    <string name="map_type">地图类型</string>
+    <string name="map_standard">标准</string>
+    <string name="map_satellite">卫星</string>
+    <string name="show_operator_markers">显示飞手标记</string>
+    <string name="show_name_labels">显示名称标签</string>
+    <string name="checking_update">正在检查…</string>
+    <string name="update_latest">当前已是最新版本</string>
+    <string name="update_failed">检查更新失败，请检查网络</string>
+    <string name="github_repo">GitHub 仓库</string>
+    <string name="about_desc">无人机 Remote ID（RID）检测应用。通过蓝牙与 WiFi 广播扫描附近无人机，显示位置、高度、速度等信息，用于反制与空域监测。</string>
 </resources>
