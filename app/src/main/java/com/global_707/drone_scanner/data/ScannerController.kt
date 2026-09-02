@@ -5,7 +5,6 @@ import android.annotation.SuppressLint
 import android.bluetooth.BluetoothManager
 import android.bluetooth.le.BluetoothLeScanner
 import android.bluetooth.le.ScanCallback
-import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
@@ -15,7 +14,7 @@ import android.location.LocationManager
 import android.net.wifi.ScanResult as WifiScanResult
 import android.net.wifi.WifiManager
 import android.os.Build
-import android.os.ParcelUuid
+import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -68,6 +67,18 @@ object ScannerController {
     private var lastKnownLocation: Location? = null
     @Volatile
     private var running = false
+
+    // ---------- 诊断日志 / 节流参数 ----------
+    private const val TAG = "RidScanner"
+    /** 现场诊断：BLE 扫描窗口长度（毫秒），定期汇总一条日志 */
+    private const val SCAN_LOG_WINDOW_MS = 5000L
+    /** Wi-Fi startScan 系统节流下限（毫秒）：更频繁调用会被系统忽略并返回陈旧结果 */
+    private const val WIFI_SCAN_INTERVAL_MS = 20_000L
+    /** Wi-Fi scanResults 读取轮询间隔（毫秒） */
+    private const val WIFI_RESULTS_READ_MS = 5000L
+    private var scanWindowStart = 0L
+    private var scanWindowPackets = 0
+    private var scanWindowRid = 0
 
     /** 单台设备的累积状态（合并 Basic ID / Location / Operator 分帧消息） */
     private class DetectedDevice(val key: String) {
@@ -220,6 +231,25 @@ object ScannerController {
         drones = if (AppPrefs.demoMode) real + MockData.drones else real
     }
 
+    // ---------- 诊断日志 ----------
+
+    /** 现场诊断：统计 BLE 扫描窗口内广播包总数与 RID 命中数，每 5 秒汇总一条日志 */
+    private fun logScanWindow(isRid: Boolean) {
+        val now = System.currentTimeMillis()
+        if (scanWindowStart == 0L) scanWindowStart = now
+        scanWindowPackets++
+        if (isRid) scanWindowRid++
+        if (now - scanWindowStart >= SCAN_LOG_WINDOW_MS) {
+            Log.d(
+                TAG,
+                "BLE 扫描 ${(now - scanWindowStart) / 1000}s：广播包=$scanWindowPackets RID命中=$scanWindowRid",
+            )
+            scanWindowStart = now
+            scanWindowPackets = 0
+            scanWindowRid = 0
+        }
+    }
+
     // ---------- 蓝牙 ----------
 
     @SuppressLint("MissingPermission")
@@ -251,20 +281,30 @@ object ScannerController {
             return
         }
         bluetoothLeScanner = scanner
-        val filters = BluetoothRidParser.RID_SERVICE_UUIDS.map { uuid16 ->
-            ScanFilter.Builder()
-                .setServiceUuid(ParcelUuid.fromString("0000%04X-0000-1000-8000-00805F9B34FB".format(uuid16)))
-                .build()
-        }
+
+        // 重要：不要按 Service-UUID 列表做 ScanFilter 过滤！
+        // RID（ASTM F3411）蓝牙广播把 25 字节消息放在「Service Data」AD 里；Legacy 广播
+        // 总负载只有 31 字节，装不下额外的 Service-UUID 列表 AD，因此多数信标只带
+        // Service Data。而 ScanFilter.setServiceUuid 只匹配 Service-UUID 列表，
+        // 会把这类 RID 包全部过滤掉 → 一个结果都收不到（外场实测主因）。已移除过滤，
+        // 改为全量扫描 + 回调内解析（BluetoothRidParser 对非 RID 载荷返回 null，代价很小）。
         val settings = ScanSettings.Builder()
             .setScanMode(scanModeFor(AppPrefs.scanPriority))
+            // 接收全部 PHY（1M/2M/Coded），否则 BT5 扩展广播 / 长距 RID（0xFFFE/0xFFFF）收不到
+            .setPhy(ScanSettings.PHY_LE_ALL_SUPPORTED)
             .build()
         scanCallback = object : ScanCallback() {
             override fun onScanResult(callbackType: Int, result: ScanResult) {
+                logScanWindow(isRid = false)
                 handleBluetoothResult(result)
             }
 
+            override fun onBatchScanResults(results: List<ScanResult>) {
+                results.forEach { onScanResult(0, it) }
+            }
+
             override fun onScanFailed(errorCode: Int) {
+                Log.w(TAG, "BLE 扫描失败 errorCode=$errorCode")
                 scanState = scanState.copy(
                     bluetoothScanning = false,
                     bluetoothErrorCode = errorCode,
@@ -272,9 +312,12 @@ object ScannerController {
             }
         }
         try {
-            scanner.startScan(filters, settings, scanCallback)
+            // filters 传 null = 全量扫描，是否 RID 由解析器判定
+            scanner.startScan(null, settings, scanCallback)
+            Log.d(TAG, "BLE 扫描已启动（全量, phy=ALL, mode=${scanModeFor(AppPrefs.scanPriority)}）")
             scanState = scanState.copy(bluetoothScanning = true, bluetoothErrorCode = null)
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.w(TAG, "启动 BLE 扫描失败: ${e.message}")
             scanCallback = null
             scanState = scanState.copy(
                 bluetoothScanning = false,
@@ -292,7 +335,17 @@ object ScannerController {
     private fun handleBluetoothResult(result: ScanResult) {
         val record = result.scanRecord ?: return
         val rid = BluetoothRidParser.parse(record) ?: return
-        val key = rid.serialNumber ?: result.device.address
+        logScanWindow(isRid = true)
+        Log.d(
+            TAG,
+            "RID 命中 addr=${result.device.address} rssi=${result.rssi} " +
+                "serial=${rid.serialNumber ?: "—"} idType=${rid.idType ?: "—"} " +
+                "lat=${rid.latitude ?: "—"} lon=${rid.longitude ?: "—"}",
+        )
+        // 统一以设备 MAC 为 key：同一设备 Basic ID / Location / Operator 分帧才能合并到
+        // 同一条记录。若以 serial 为 key，先到 Location（无序列号）、后到 Basic ID（带
+        // 序列号）会把同一设备分裂成两条记录，各自只含一半字段。
+        val key = result.device.address.ifBlank { rid.serialNumber ?: "unknown" }
         val now = System.currentTimeMillis()
         val device = synchronized(detected) {
             detected.getOrPut(key) { DetectedDevice(key) }.also { d ->
@@ -320,21 +373,37 @@ object ScannerController {
             scanState = scanState.copy(wifiScanning = true, wifiErrorCode = null)
         }
         wifiJob = scope?.launch {
+            // 注意：RID over Wi-Fi 的主流承载是 Wi-Fi Aware (NAN) / Beacon 广播，
+            // 本通道只能发现以 AP/Beacon 模式广播 ASTM OUI（FA-0B-9C）的信标（Android 16+），
+            // NAN 广播不会出现在 WifiManager.scanResults 中。
+            // Android 对 startScan 有系统级节流（后台约 20s+ 一次，13+ 更严），高频调用会被
+            // 系统静默忽略并持续返回陈旧结果，故按节流间隔低频触发 + 周期性读取结果缓存。
+            var lastScanAt = 0L
             while (isActive) {
-                try {
-                    @Suppress("DEPRECATION")
-                    wifiManager?.startScan()
-                } catch (_: Exception) {
+                val now = System.currentTimeMillis()
+                if (now - lastScanAt >= WIFI_SCAN_INTERVAL_MS) {
+                    lastScanAt = now
+                    try {
+                        @Suppress("DEPRECATION")
+                        val accepted = wifiManager?.startScan()
+                        if (accepted == false) {
+                            Log.w(TAG, "WifiManager.startScan 被系统拒绝（节流/权限），按间隔重试")
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "WifiManager.startScan 异常: ${e.message}")
+                    }
                 }
-                delay(2500)
+                delay(WIFI_RESULTS_READ_MS)
                 val results = try {
                     wifiManager?.scanResults ?: emptyList()
                 } catch (_: SecurityException) {
                     emptyList()
                 }
-                val now = System.currentTimeMillis()
+                val nowMs = System.currentTimeMillis()
+                var wifiRidHits = 0
                 results.forEach { result ->
                     if (hasRidOui(result)) {
+                        wifiRidHits++
                         val key = "wifi:" + (result.BSSID ?: result.SSID)
                         synchronized(detected) {
                             detected.getOrPut(key) {
@@ -344,13 +413,15 @@ object ScannerController {
                                 }
                             }.also { d ->
                                 d.rssi = result.level
-                                d.lastSeen = now
+                                d.lastSeen = nowMs
                             }
                         }
                     }
                 }
+                if (wifiRidHits > 0) {
+                    Log.d(TAG, "Wi-Fi RID 命中 ${wifiRidHits} 个信标")
+                }
                 refresh()
-                delay(6000)
             }
         }
     }
