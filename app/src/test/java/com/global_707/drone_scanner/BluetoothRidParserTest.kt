@@ -164,4 +164,144 @@ class BluetoothRidParserTest {
         val edge = BluetoothRidParser.parseMessages(locationWithDirection(36000.toShort()))
         assertEquals(360.0f, edge[0].directionDeg!!, 0.01f)
     }
+
+    // ---------- 标准 ASTM F3411（0xFFA0 承载） ----------
+
+    /** 构造标准 25 字节 Basic ID 消息 */
+    private fun stdBasicId25(serial: String): ByteArray {
+        val buf = ByteBuffer.allocate(25)
+        buf.put(0x00)            // msgType: Basic ID
+        buf.put(0x02)            // protocolVersion
+        buf.put(0x01)            // idType: 序列号
+        buf.put(0x11)            // uasIdType(低 4 位) + uasType(高 4 位)
+        buf.put(serial.toByteArray(Charsets.US_ASCII))  // 剩余自动 0x00 填充
+        buf.put(0)               // reserved
+        return buf.array()
+    }
+
+    /** 构造标准 25 字节 Location/Vector 消息 */
+    private fun stdLocation25(
+        direction: Int = 36,
+        speed: Int = 40,
+        vSpeed: Int = 4,
+        lat: Int = 312304000,
+        lon: Int = 1214737000,
+        pressure: Int = 2420,
+        geodetic: Int = 2420,
+        height: Int = 60,
+        ts: Int = 30,
+    ): ByteArray {
+        val buf = ByteBuffer.allocate(25).order(ByteOrder.LITTLE_ENDIAN)
+        buf.put(0x01)            // msgType: Location/Vector
+        buf.put(0x02)            // protocolVersion
+        buf.put(0x02)            // status: airborne
+        buf.put(0)               // reserved
+        buf.put(direction.toByte())
+        buf.put(speed.toByte())
+        buf.put(vSpeed.toByte())
+        buf.putInt(lat)
+        buf.putInt(lon)
+        buf.putShort(pressure.toShort())
+        buf.putShort(geodetic.toShort())
+        buf.put(height.toByte())
+        buf.put(0)               // horizAcc
+        buf.put(0)               // vertAcc
+        buf.put(0)               // baroAcc
+        buf.put(0)               // speedAcc
+        buf.put(ts.toByte())     // timestamp
+        return buf.array()
+    }
+
+    @Test
+    fun `标准LocationVector应按官方布局解析`() {
+        val msgs = BluetoothRidParser.parseStandardMessages(stdLocation25())
+        assertEquals(1, msgs.size)
+        val m = msgs[0]
+        // 航向 10° 步进、速度 0.25 m/s
+        assertEquals(360.0f, m.directionDeg!!, 0.01f)
+        assertEquals(10.0f, m.speedMs!!, 0.01f)
+        assertEquals(1.0f, m.verticalSpeedMs!!, 0.01f)
+        assertEquals(31.2304, m.latitude!!, 1e-6)
+        assertEquals(121.4737, m.longitude!!, 1e-6)
+        // 高度 = 原始值 × 0.5 − 1000（标准偏移编码）
+        assertEquals(210.0f, m.pressureAltitudeM!!, 0.01f)
+        assertEquals(210.0f, m.geodeticAltitudeM!!, 0.01f)
+        assertEquals(60.0f, m.heightAboveTakeoffM!!, 0.01f)
+        assertEquals(3.0f, m.ridTimestampSeconds!!, 0.01f)
+        assertEquals(2, m.protocolVersion)
+    }
+
+    @Test
+    fun `标准未知值应解析为null`() {
+        val m = BluetoothRidParser.parseStandardMessages(
+            stdLocation25(
+                direction = 0xFF, speed = 0xFF, vSpeed = 0x80,
+                lat = Int.MIN_VALUE, lon = Int.MIN_VALUE,
+                pressure = 0xFFFF, geodetic = 0xFFFF, height = 0xFF, ts = 0xFF,
+            ),
+        )[0]
+        assertNull(m.directionDeg)
+        assertNull(m.speedMs)
+        assertNull(m.verticalSpeedMs)
+        assertNull(m.latitude)
+        assertNull(m.longitude)
+        assertNull(m.pressureAltitudeM)
+        assertNull(m.geodeticAltitudeM)
+        assertNull(m.heightAboveTakeoffM)
+        assertNull(m.ridTimestampSeconds)
+        assertNotNull(m.statusFlags)
+    }
+
+    @Test
+    fun `标准BasicID与MessagePack应解析并合并`() {
+        val basic = BluetoothRidParser.parseStandardMessages(stdBasicId25("1596F1ABCD1234567890"))
+        assertEquals(1, basic.size)
+        assertEquals("1596F1ABCD1234567890", basic[0].serialNumber)
+        assertEquals(1, basic[0].idType)
+
+        // Message Pack：0x0F + authType + Basic ID + Location（标准子消息分派）
+        val pack = ByteBuffer.allocate(2 + 25 + 25)
+        pack.put(0x0F.toByte())
+        pack.put(0x00)
+        pack.put(stdBasicId25("1596F1ABCD1234567890"))
+        pack.put(stdLocation25())
+        val msgs = BluetoothRidParser.parseStandardMessages(pack.array())
+        assertEquals(2, msgs.size)
+        val merged = msgs.fold(BluetoothRidParser.RidMessage()) { acc, m -> acc.merge(m) }
+        assertEquals("1596F1ABCD1234567890", merged.serialNumber)
+        assertEquals(31.2304, merged.latitude!!, 1e-6)
+        assertEquals(10.0f, merged.speedMs!!, 0.01f)
+    }
+
+    @Test
+    fun `标准System应解析操作员位置`() {
+        val buf = ByteBuffer.allocate(25).order(ByteOrder.LITTLE_ENDIAN)
+        buf.put(0x02)            // msgType: System
+        buf.put(0x02)            // protocolVersion
+        buf.putInt(432000)       // 系统时间戳（0.1s）
+        buf.put(0x01)            // 操作员位置类型：动态实时
+        buf.putInt(312304000)    // 操作员纬度
+        buf.putInt(1214737000)   // 操作员经度
+        buf.putShort(100)        // 区域半径
+        buf.put(50)              // 区域高度
+        buf.put(20)              // 区域下限
+        buf.put(0)               // 精度枚举 ×4 + 保留
+        buf.put(0)
+        buf.put(0)
+        buf.put(0)
+        buf.put(0)
+        buf.put(0)
+        val msgs = BluetoothRidParser.parseStandardMessages(buf.array())
+        assertEquals(1, msgs.size)
+        assertEquals(31.2304, msgs[0].operatorLatitude!!, 1e-6)
+        assertEquals(121.4737, msgs[0].operatorLongitude!!, 1e-6)
+    }
+
+    @Test
+    fun `标准认证与自描述消息应被跳过`() {
+        val auth = byteArrayOf(0x04, 0x02, 0x00, 0x01, 0x02, 0x03)
+        assertTrue(BluetoothRidParser.parseStandardMessages(auth).isEmpty())
+        val selfId = byteArrayOf(0x05, 0x02, 0x00, 0x41, 0x42)
+        assertTrue(BluetoothRidParser.parseStandardMessages(selfId).isEmpty())
+    }
 }

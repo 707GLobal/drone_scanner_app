@@ -23,6 +23,13 @@ object BluetoothRidParser {
     /** 承载 RID 消息的 16 位 Service UUID 列表 */
     val RID_SERVICE_UUIDS = listOf(0xFFFA, 0xFFFB, 0xFFFC, 0xFFFD, 0xFFFE, 0xFFFF)
 
+    /**
+     * 标准 ASTM F3411-22 指定的 BLE Service UUID（0xFFA0）。
+     * 主流厂商（DJI 国际版固件、Autel 等）的合规 Remote ID 均用该 UUID 广播，
+     * 消息类型编号与本 App 此前按私有变体实现的 0xFFFA–0xFFFF 通道不同，需独立分派。
+     */
+    private const val STANDARD_UUID16 = 0xFFA0
+
     /** Message Pack 内子消息固定长度 */
     private const val MESSAGE_PACK_SIZE = 25
 
@@ -33,6 +40,12 @@ object BluetoothRidParser {
     private const val MSG_LOCATION_AUTH = 0x03
     private const val MSG_OPERATOR_ID = 0x06
     private const val MSG_OPERATOR_LOCATION = 0x08
+
+    // 标准 ASTM F3411-22 消息类型编号（与上面的私有变体编号不同！）
+    private const val STD_MSG_BASIC_ID = 0x00
+    private const val STD_MSG_LOCATION = 0x01
+    private const val STD_MSG_SYSTEM = 0x02
+    private const val STD_MSG_OPERATOR_ID = 0x03
 
     /** 解析出的 RID 字段（合并多次广播 / 多个子消息的结果） */
     data class RidMessage(
@@ -76,7 +89,12 @@ object BluetoothRidParser {
         )
     }
 
-    /** 从 ScanRecord 提取并合并 RID 消息；非 RID 广播返回 null */
+    /**
+     * 从 ScanRecord 提取并合并 RID 消息；非 RID 广播返回 null。
+     * 同时尝试两套承载：
+     *  - 私有/国标变体（0xFFFA–0xFFFF）：本 App 原有解析通道
+     *  - 标准 ASTM F3411（0xFFA0）：DJI 国际版等主流厂商的合规广播
+     */
     fun parse(record: ScanRecord): RidMessage? {
         var merged: RidMessage? = null
         for (uuid16 in RID_SERVICE_UUIDS) {
@@ -88,11 +106,19 @@ object BluetoothRidParser {
                 merged = merged?.merge(msg) ?: msg
             }
         }
+        val standardUuid = ParcelUuid.fromString(
+            "0000%04X-0000-1000-8000-00805F9B34FB".format(STANDARD_UUID16)
+        )
+        record.getServiceData(standardUuid)?.let { data ->
+            parseStandardMessages(data).forEach { msg ->
+                merged = merged?.merge(msg) ?: msg
+            }
+        }
         return merged
     }
 
     /**
-     * 解析一段 RID 载荷，支持：
+     * 解析一段 RID 载荷（私有变体格式），支持：
      *  - 单条消息（0x00/0x01/0x02/0x03/0x06/0x08）
      *  - Message Pack（0x0F + authType + N×25 字节子消息）
      * 返回所有可解析消息（Message Pack 可能同时包含 Basic ID 与 Location 等）。
@@ -100,16 +126,31 @@ object BluetoothRidParser {
     fun parseMessages(data: ByteArray): List<RidMessage> {
         if (data.size < 2) return emptyList()
         return when (data[0].toInt() and 0xFF) {
-            MSG_PACK -> parseMessagePack(data)
+            MSG_PACK -> parseMessagePack(data, standard = false)
             else -> listOfNotNull(parseSingle(data))
         }
     }
 
-    private fun parseMessagePack(data: ByteArray): List<RidMessage> {
+    /**
+     * 解析标准 ASTM F3411-22 载荷（0xFFA0 Service Data）：
+     *  - 单条 25 字节消息（0x00 Basic ID / 0x01 Location/Vector / 0x02 System / 0x03 Operator ID；
+     *    0x04 Authentication 与 0x05 Self-ID 本 App 无对应展示字段，跳过）
+     *  - Message Pack（0x0F，信封与私有变体相同，子消息按标准类型分派）
+     */
+    fun parseStandardMessages(data: ByteArray): List<RidMessage> {
+        if (data.size < 2) return emptyList()
+        return when (data[0].toInt() and 0xFF) {
+            MSG_PACK -> parseMessagePack(data, standard = true)
+            else -> listOfNotNull(parseStandardSingle(data))
+        }
+    }
+
+    private fun parseMessagePack(data: ByteArray, standard: Boolean): List<RidMessage> {
         val result = mutableListOf<RidMessage>()
         var offset = 2 // 跳过 msgType(0x0F) + authType
         while (offset + MESSAGE_PACK_SIZE <= data.size) {
-            parseSingle(data.copyOfRange(offset, offset + MESSAGE_PACK_SIZE))
+            val chunk = data.copyOfRange(offset, offset + MESSAGE_PACK_SIZE)
+            (if (standard) parseStandardSingle(chunk) else parseSingle(chunk))
                 ?.let { result.add(it) }
             offset += MESSAGE_PACK_SIZE
         }
@@ -125,6 +166,95 @@ object BluetoothRidParser {
             MSG_OPERATOR_LOCATION -> parseOperatorLocation(data)
             else -> null
         }
+    }
+
+    // ---------- 标准 ASTM F3411-22 消息解析（0xFFA0 承载） ----------
+
+    /** 标准消息分派：0x00 Basic ID / 0x01 Location/Vector / 0x02 System / 0x03 Operator ID */
+    private fun parseStandardSingle(data: ByteArray): RidMessage? {
+        if (data.size < 2) return null
+        return when (data[0].toInt() and 0xFF) {
+            STD_MSG_BASIC_ID -> parseStdBasicId(data)
+            STD_MSG_LOCATION -> parseStdLocation(data)
+            STD_MSG_SYSTEM -> parseStdSystem(data)
+            STD_MSG_OPERATOR_ID -> parseStdOperatorId(data)
+            else -> null
+        }
+    }
+
+    /**
+     * 标准 Basic ID：msgType(1) version(1) idType(1) uasIdType+uasType(1) id(20) reserved(1)。
+     * idType：1=序列号 2=注册号 3=UTM 分配 4=会话 ID 5=特定会话 ID。
+     */
+    private fun parseStdBasicId(data: ByteArray): RidMessage? {
+        if (data.size < 24) return null
+        val id = decodeId(data, 4, 20)
+        if (id.isNullOrBlank()) return null
+        return RidMessage(
+            serialNumber = id,
+            idType = data[2].toInt() and 0xFF,
+            protocolVersion = data[1].toInt() and 0xFF,
+        )
+    }
+
+    /**
+     * 标准 Location/Vector（25 字节，小端序）：
+     * msgType(1) version(1) status(1) reserved(1) direction(1, 10°) speed(1, 0.25m/s)
+     * speedV(1, 有符号 0.25m/s) lat(4, 1e-7°) lon(4, 1e-7°) pressureAlt(2, 0.5m-1000m 偏移)
+     * geodeticAlt(2, 同左) height(1, 1m) 精度枚举(4) timestamp(1, 0.1s)。
+     * 特殊值：0xFF / 0xFFFF / 0x80000000 表示未知。
+     */
+    private fun parseStdLocation(data: ByteArray): RidMessage? {
+        if (data.size < 25) return null
+        val buf = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN)
+        val statusFlags = data[2].toInt() and 0xFF
+        // 航向 10° 步进：0..36 表示 0..360°，其余按未知处理
+        val directionRaw = data[4].toInt() and 0xFF
+        val speedRaw = data[5].toInt() and 0xFF
+        val vSpeedRaw = data[6].toInt() // 有符号
+        buf.position(7)
+        val lat = stdInt32OrNull(buf.int)?.let { it / 1e7 }?.takeIf { kotlin.math.abs(it) <= 90.0 }
+        val lon = stdInt32OrNull(buf.int)?.let { it / 1e7 }?.takeIf { kotlin.math.abs(it) <= 180.0 }
+        // 高度编码：0.5m 步进 + (-1000m) 偏移（OpenDroneID 参考实现同款）
+        val pressureAlt = uint16OrNull(buf)?.let { it * 0.5f - 1000f }
+        val geodeticAlt = uint16OrNull(buf)?.let { it * 0.5f - 1000f }
+        val heightRaw = data[19].toInt() and 0xFF
+        val tsRaw = data[24].toInt() and 0xFF
+        return RidMessage(
+            protocolVersion = data[1].toInt() and 0xFF,
+            statusFlags = statusFlags,
+            directionDeg = if (directionRaw in 0..36) directionRaw * 10f else null,
+            speedMs = if (speedRaw != 0xFF) speedRaw * 0.25f else null,
+            verticalSpeedMs = if (vSpeedRaw != -128) vSpeedRaw * 0.25f else null,
+            latitude = lat,
+            longitude = lon,
+            pressureAltitudeM = pressureAlt,
+            geodeticAltitudeM = geodeticAlt,
+            heightAboveTakeoffM = if (heightRaw != 0xFF) heightRaw.toFloat() else null,
+            ridTimestampSeconds = if (tsRaw != 0xFF) tsRaw * 0.1f else null,
+        )
+    }
+
+    /**
+     * 标准 System：msgType(1) version(1) sysTimestamp(4) opLocationType(1)
+     * opLat(4) opLon(4) areaRadius(2)…。操作员位置类型：0=起飞点 1=动态实时 2=固定点。
+     */
+    private fun parseStdSystem(data: ByteArray): RidMessage? {
+        if (data.size < 15) return null
+        val buf = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN)
+        buf.position(7)
+        val lat = stdInt32OrNull(buf.int)?.let { it / 1e7 }?.takeIf { kotlin.math.abs(it) <= 90.0 }
+        val lon = stdInt32OrNull(buf.int)?.let { it / 1e7 }?.takeIf { kotlin.math.abs(it) <= 180.0 }
+        if (lat == null || lon == null) return null
+        return RidMessage(operatorLatitude = lat, operatorLongitude = lon)
+    }
+
+    /** 标准 Operator ID：msgType(1) version(1) opIdType(1) operatorId(20) */
+    private fun parseStdOperatorId(data: ByteArray): RidMessage? {
+        if (data.size < 23) return null
+        val operatorId = decodeId(data, 3, 20)
+        if (operatorId.isNullOrBlank()) return null
+        return RidMessage(operatorId = operatorId)
     }
 
     /**
@@ -218,6 +348,10 @@ object BluetoothRidParser {
         val raw = buf.short.toInt() and 0xFFFF
         return if (raw == 0xFFFF) null else raw
     }
+
+    /** 0x80000000 表示未知（标准格式仅此一个特殊值；0 是合法坐标，不当作未知） */
+    private fun stdInt32OrNull(raw: Int): Int? =
+        if (raw == Int.MIN_VALUE) null else raw
 
     /** 0x80000000 表示未知 */
     private fun int32OrNull(buf: ByteBuffer): Int? {

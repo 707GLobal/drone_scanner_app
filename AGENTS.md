@@ -12,8 +12,15 @@ RID（Remote ID，ASTM F3411 / ASD-STAN EN 4709-002）广播，解包后在腾�
 
 两条射频通道：
 
-- **蓝牙 BLE**：扫描 Service UUID `0xFFFA–0xFFFF` 广播并完整解包
-  （单条 25 字节消息 + Message Pack 0x0F，全部小端序）。
+- **蓝牙 BLE**：双通道解析——
+  - **标准 ASTM F3411-22**（Service UUID `0xFFA0`，DJI 国际版/Autel 等主流厂商合规广播）：
+    消息类型 `0x0` Basic ID / `0x1` Location/Vector / `0x2` System / `0x3` Operator ID
+    / `0x4` Auth（跳过）/ `0x5` Self-ID（跳过）+ `0xF` Message Pack；
+    航向 1 字节 10° 步进、速度 1 字节 0.25m/s、高度 0.5m 步进带 -1000m 偏移，全部小端序。
+  - **私有/国标变体**（Service UUID `0xFFFA–0xFFFF`，字节布局来源未定，待真机抓包核对）：
+    消息类型 `0x00/0x01` Basic ID、`0x02/0x03` Location、`0x06` Operator ID、
+    `0x08` Operator Location + `0x0F` Message Pack。
+  - 两套承载在 `BluetoothRidParser.parse()` 内同时尝试并合并，注意两套消息类型编号不同。
 - **Wi-Fi（仅 Android 16+ / API 36+）**：轮询 beacon，检测制造商 IE（ID 221）携带的
   ASTM OUI `FA-0B-9C`（只上报设备，不解包详细字段）。
 
@@ -209,4 +216,8 @@ gradlew.bat assembleRelease               # release（minify + shrink）
   `Build.VERSION_CODES.VANILLA_ICE_CREAM` 门槛避开旧类型，改动时保持该兼容分支。
 - BLE 传统广播 25 字节承载没有时间戳字段（31 字节 Wi-Fi Beacon 才有），`parseLocation`
   里 `ridTimestampSeconds` 只在 `data.size >= 31` 时解析——测试用例也验证了这一点。
+- **协议双格式陷阱**：ASTM 标准（`0xFFA0`）与私有变体（`0xFFFA–0xFFFF`）的 Message Pack
+  信封相同（`0x0F`+authType+25B×N），但**子消息类型编号完全不同**（如 `0x01` 在标准里是
+  Location、在变体里是 Basic ID），解析必须按承载 UUID 分派，勿混用；标准 Location 高度
+  是 0.5m 步进 −1000m 偏移编码，与变体的直接 0.5m 步进不同。
 - AGP 9 的 `compileSdk` 是块状新 DSL；旧工程写法（`compileSdk = 36`）在此会报错，别顺手改回去。
