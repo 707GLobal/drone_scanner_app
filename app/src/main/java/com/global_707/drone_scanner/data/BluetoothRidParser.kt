@@ -171,7 +171,9 @@ object BluetoothRidParser {
         return RidMessage(
             messageCounter = msgCounter,
             statusFlags = statusFlags,
-            directionDeg = direction?.let { it / 100f },
+            // 航向合法范围 0..360°（0xFFFF 未知已在 uint16OrNull 过滤），其余按无效丢弃，
+            // 避免垃圾载荷解出 600°+ 的乱数据直接进 UI
+            directionDeg = direction?.let { it / 100f }?.takeIf { it <= 360f },
             speedMs = speedH?.let { it * 0.25f },
             verticalSpeedMs = speedV?.let { it * 0.25f },
             latitude = lat,

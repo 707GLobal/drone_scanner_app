@@ -23,11 +23,23 @@ android {
         // 腾讯位置服务地图 Key（在用户级 ~/.gradle/gradle.properties 配置 tencentMapKey=你的Key）
         manifestPlaceholders["TENCENT_MAP_KEY"] =
             (project.findProperty("tencentMapKey") as String?) ?: "YOUR_TENCENT_MAP_KEY"
+
+        // 仅保留 ARM 原生库：腾讯地图 .so 携带 5 个 ABI 共 ~26MB，其中 x86/x86_64/
+        // legacy-armeabi 只服务模拟器/古董设备。RID 检测必须真机（见 AGENTS.md §6），
+        // 剔除后 release APK 直减 ~16MB。如需在 x86_64 模拟器上看地图，临时加 "x86_64"。
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
     }
 
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+
+    androidResources {
+        // 仅保留中文资源：剔除依赖库携带的几十种语言资源表（应用 UI 全中文）
+        localeFilters += listOf("zh")
     }
 
     buildTypes {
@@ -48,11 +60,7 @@ android {
 }
 
 dependencies {
-    implementation(libs.androidx.activity.ktx)
-    implementation(libs.androidx.appcompat)
-    implementation(libs.androidx.constraintlayout)
     implementation(libs.androidx.core.ktx)
-    implementation(libs.material)
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)

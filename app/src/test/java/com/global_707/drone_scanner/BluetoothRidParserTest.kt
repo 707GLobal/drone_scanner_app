@@ -132,4 +132,36 @@ class BluetoothRidParserTest {
         assertNull(m.heightAboveTakeoffM)
         assertNotNull(m.messageCounter)
     }
+
+    /** 构造仅 direction 字段可变的 25 字节 Location/Vector 消息（其余字段置未知） */
+    private fun locationWithDirection(rawDirection: Short): ByteArray {
+        val buf = ByteBuffer.allocate(25).order(ByteOrder.LITTLE_ENDIAN)
+        buf.put(0x02)            // msgType: Location/Vector
+        buf.put(0x02)            // protoVersion
+        buf.put(0x01)            // msgCounter
+        buf.put(0x00)            // status
+        buf.putShort(rawDirection)
+        buf.putShort(0xFFFF.toShort())  // speedH 未知
+        buf.putShort(0xFFFF.toShort())  // speedV 未知
+        buf.putInt(Int.MIN_VALUE)       // lat 未知
+        buf.putInt(Int.MIN_VALUE)       // lon 未知
+        buf.putShort(0xFFFF.toShort())  // pressureAlt 未知
+        buf.putShort(0xFFFF.toShort())  // geodeticAlt 未知
+        buf.putShort(0xFFFF.toShort())  // height 未知
+        buf.put(0.toByte())
+        return buf.array()
+    }
+
+    @Test
+    fun `航向超出360度应视为无效`() {
+        // 0xFFFF（未知）→ null
+        val unknown = BluetoothRidParser.parseMessages(locationWithDirection(0xFFFF.toShort()))
+        assertNull(unknown[0].directionDeg)
+        // 361.00°（原始值 36100，超出合法上限）→ null（无符号位型，toShort 截断不影响位型）
+        val over = BluetoothRidParser.parseMessages(locationWithDirection(36100.toShort()))
+        assertNull(over[0].directionDeg)
+        // 360.00° 边界值合法
+        val edge = BluetoothRidParser.parseMessages(locationWithDirection(36000.toShort()))
+        assertEquals(360.0f, edge[0].directionDeg!!, 0.01f)
+    }
 }

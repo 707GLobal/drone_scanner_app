@@ -83,8 +83,6 @@ fun MapControls(
                 onClick = {
                     if (locateTargets.isNotEmpty()) {
                         locateExpanded = !locateExpanded
-                    } else {
-                        locateTargets.firstOrNull()?.onClick()
                     }
                 },
             )

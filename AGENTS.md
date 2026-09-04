@@ -33,6 +33,7 @@ RID（Remote ID，ASTM F3411 / ASD-STAN EN 4709-002）广播，解包后在腾�
 | 地图 | `com.tencent.map:tencent-map-vector-sdk` 5.7.0 | 私有源 `https://mapapi.qq.com/map/mapsdk`（`settings.gradle.kts`） |
 | 测试 | JUnit4（本地单测）+ Espresso/JUnit（androidTest 桩） | `androidx.test.ext:junit`、`espresso-core` |
 | 协程 | 直接 import `kotlinx.coroutines.*` | 来自 Compose 传递依赖，未显式声明，勿依赖具体版本 |
+| APK 体积策略 | `abiFilters` 仅 `arm64-v8a`/`armeabi-v7a`；`localeFilters` 仅 `zh`；依赖仅 core-ktx + Compose + 腾讯 SDK | 模拟器看地图需临时加 `x86_64`；XML 主题只能用框架 `android:Theme.Material*`（已移除 material/appcompat/constraintlayout） |
 
 release 构建开启 minify + shrinkResources；腾讯 SDK 自带 consumer rules
 （`app/proguard-rules.pro` 基本只有注释，文件注释为 GBK 编码、乱码属正常，无需处理）。
@@ -155,7 +156,7 @@ Windows 下用 wrapper：
 ```bash
 gradlew.bat assembleDebug                 # 构建 debug APK
 gradlew.bat installDebug                  # 安装到已连接真机
-gradlew.bat testDebugUnitTest             # 跑单测（BluetoothRidParserTest 5 例）
+gradlew.bat testDebugUnitTest             # 跑单测（BluetoothRidParserTest 6 例）
 gradlew.bat assembleRelease               # release（minify + shrink）
 ```
 

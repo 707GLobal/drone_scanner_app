@@ -68,6 +68,10 @@ object ScannerController {
     @Volatile
     private var running = false
 
+    /** 是否已有一次节流刷新在排队（配合 [requestRefresh] 合并 BLE 高频回调） */
+    @Volatile
+    private var refreshScheduled = false
+
     // ---------- 诊断日志 / 节流参数 ----------
     private const val TAG = "RidScanner"
     /** 现场诊断：BLE 扫描窗口长度（毫秒），定期汇总一条日志 */
@@ -76,6 +80,9 @@ object ScannerController {
     private const val WIFI_SCAN_INTERVAL_MS = 20_000L
     /** Wi-Fi scanResults 读取轮询间隔（毫秒） */
     private const val WIFI_RESULTS_READ_MS = 5000L
+
+    /** UI 刷新节流窗口：BLE 高频回调合并为至多每 300ms 一次列表重建 + 地图重画 */
+    private const val REFRESH_COALESCE_MS = 300L
     private var scanWindowStart = 0L
     private var scanWindowPackets = 0
     private var scanWindowRid = 0
@@ -130,6 +137,7 @@ object ScannerController {
     fun start(context: Context) {
         if (running) return
         running = true
+        refreshScheduled = false
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         refreshLocation(context)
         refreshSystemState(context)
@@ -189,17 +197,9 @@ object ScannerController {
     @SuppressLint("MissingPermission")
     fun stop() {
         running = false
+        refreshScheduled = false
         try {
-            bluetoothLeScanner?.let { scanner ->
-                scanCallback?.let { cb ->
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                        scanner.stopScan(cb)
-                    } else {
-                        @Suppress("DEPRECATION")
-                        scanner.stopScan(cb)
-                    }
-                }
-            }
+            scanCallback?.let { cb -> bluetoothLeScanner?.stopScan(cb) }
         } catch (_: Exception) {
         }
         wifiJob?.cancel()
@@ -211,8 +211,9 @@ object ScannerController {
         scanState = ScanState(isScanning = false, wifiScanning = false, bluetoothScanning = false)
     }
 
-    /** 设置变化后重启扫描 */
+    /** 设置变化后重启扫描（仅在扫描运行中响应；未运行时不主动拉起——扫描只在首页运行） */
     fun restart(context: Context) {
+        if (!running) return
         stop()
         start(context)
     }
@@ -232,6 +233,27 @@ object ScannerController {
     }
 
     // ---------- 诊断日志 ----------
+
+    /**
+     * BLE 回调热路径专用刷新：把每包一次的全量列表重建（`drones` 状态写入会连锁触发
+     * 地图 clear + 全量重画标记）合并为 [REFRESH_COALESCE_MS] 窗口内一次，
+     * 显著降低主线程与 UI 负载。非热路径（设置变更、Wi-Fi 轮询）仍直接调 [refresh]。
+     */
+    private fun requestRefresh() {
+        if (refreshScheduled) return
+        refreshScheduled = true
+        val s = scope
+        if (s == null) {
+            refreshScheduled = false
+            refresh()
+            return
+        }
+        s.launch {
+            delay(REFRESH_COALESCE_MS)
+            refreshScheduled = false
+            refresh()
+        }
+    }
 
     /** 现场诊断：统计 BLE 扫描窗口内广播包总数与 RID 命中数，每 5 秒汇总一条日志 */
     private fun logScanWindow(isRid: Boolean) {
@@ -354,7 +376,7 @@ object ScannerController {
                 d.lastSeen = now
             }
         }
-        refresh()
+        requestRefresh()
     }
 
     // ---------- WiFi ----------
@@ -524,10 +546,14 @@ object ScannerController {
     }
 
     private fun updateScanState() {
-        scanState = ScanState(
+        // 注意：copy 保留 startBluetooth/startWifi 刚写入的各通道实际状态与错误码；
+        // 若整表重建（旧行为）会把刚检测到的"设备不支持/开关未开启"错误抹成"扫描中"。
+        scanState = scanState.copy(
             isScanning = running,
-            wifiScanning = running && AppPrefs.wifiScanEnabled,
-            bluetoothScanning = running && AppPrefs.bluetoothScanEnabled,
+            bluetoothScanning = running && AppPrefs.bluetoothScanEnabled &&
+                scanState.bluetoothScanning && scanState.bluetoothErrorCode == null,
+            wifiScanning = running && AppPrefs.wifiScanEnabled &&
+                scanState.wifiScanning && scanState.wifiErrorCode == null,
         )
     }
 

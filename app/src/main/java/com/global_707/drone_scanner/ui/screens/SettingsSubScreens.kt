@@ -474,12 +474,15 @@ fun AboutScreen(onBack: () -> Unit) {
                     Modifier
                         .fillMaxWidth()
                         .clickable {
-                            context.startActivity(
-                                android.content.Intent(
-                                    android.content.Intent.ACTION_VIEW,
-                                    android.net.Uri.parse(githubUrl),
-                                ),
-                            )
+                            // 设备无浏览器时 startActivity 会抛 ActivityNotFoundException，吞掉避免崩溃
+                            runCatching {
+                                context.startActivity(
+                                    android.content.Intent(
+                                        android.content.Intent.ACTION_VIEW,
+                                        android.net.Uri.parse(githubUrl),
+                                    ),
+                                )
+                            }
                         }
                         .padding(vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,

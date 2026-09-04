@@ -68,6 +68,34 @@ object TencentMapBackend : MapBackend {
     /** 我的位置（地图坐标 + 指南针朝向） */
     private data class MyPosition(val latLng: LatLng, val bearing: Float)
 
+    /**
+     * 全局地图引用登记：在 update 回调（地图真正就绪）时登记本页实例；
+     * 销毁时仅当全局仍指向自己才清空，避免 AnimatedContent 过渡期间误清其他页面的地图引用。
+     * （getMap() 异步就绪，组合期捕获恒为 null——旧写法在此捕获导致清理逻辑永不生效。）
+     */
+    private class MapRef {
+        var registered: TencentMap? = null
+
+        fun register(map: TencentMap) {
+            registered = map
+            tencentMap = map
+        }
+
+        fun unregister() {
+            if (tencentMap === registered) tencentMap = null
+            registered = null
+        }
+    }
+
+    /** 已绘制内容的签名：参数均未变化时跳过 map.clear() + 全量重画标记 */
+    private data class DrawSignature(
+        val drones: List<Drone>,
+        val satellite: Boolean,
+        val showOperator: Boolean,
+        val showLabels: Boolean,
+        val myPosition: MyPosition?,
+    )
+
     /** Material 官方「飞机」图标 path（24dp 视口） */
     private const val ICON_FLIGHT =
         "M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"
@@ -92,6 +120,7 @@ object TencentMapBackend : MapBackend {
         val lifecycleOwner = LocalLifecycleOwner.current
         val mapView = remember { MapView(context) }
         var cameraMoved by remember { mutableStateOf(false) }
+        var lastDrawn by remember { mutableStateOf<DrawSignature?>(null) }
         // 我的位置（主动定位，异步获取后刷新标记；含指南针朝向）
         var myPosition by remember { mutableStateOf<MyPosition?>(null) }
 
@@ -160,11 +189,9 @@ object TencentMapBackend : MapBackend {
             onDispose { sensorManager?.unregisterListener(listener) }
         }
 
+        val mapRef = remember { MapRef() }
         DisposableEffect(lifecycleOwner) {
             var destroyed = false
-            // 本页面自己的地图实例；销毁时仅当全局引用仍指向自己才清空，
-            // 避免页面切换（AnimatedContent 过渡）时误清其他页面的地图引用
-            val myMap: TencentMap? = mapView.getMap()
             val observer = LifecycleEventObserver { _, event ->
                 when (event) {
                     Lifecycle.Event.ON_START -> mapView.onStart()
@@ -175,7 +202,7 @@ object TencentMapBackend : MapBackend {
                         if (!destroyed) {
                             destroyed = true
                             mapView.onDestroy()
-                            if (tencentMap === myMap) tencentMap = null
+                            mapRef.unregister()
                         }
                     }
                     else -> Unit
@@ -187,7 +214,7 @@ object TencentMapBackend : MapBackend {
                 if (!destroyed) {
                     destroyed = true
                     mapView.onDestroy()
-                    if (tencentMap === myMap) tencentMap = null
+                    mapRef.unregister()
                 }
             }
         }
@@ -199,7 +226,18 @@ object TencentMapBackend : MapBackend {
                 modifier = Modifier.fillMaxSize(),
                 update = update@{ view ->
                     val map = view.getMap() ?: return@update
-                    tencentMap = map
+                    mapRef.register(map)
+                    // 绘制签名去重：drones/卫星图/遥控站/标签/我的位置均未变化时，
+                    // 跳过 map.clear() + 全量重画（罗盘 >5° 之外的高频重组不再触发）
+                    val signature = DrawSignature(
+                        drones = drones,
+                        satellite = satellite,
+                        showOperator = showOperator,
+                        showLabels = showLabels,
+                        myPosition = if (showMyLocation) myPosition else null,
+                    )
+                    if (signature == lastDrawn) return@update
+                    lastDrawn = signature
                     applyMap(
                         map = map,
                         context = context,

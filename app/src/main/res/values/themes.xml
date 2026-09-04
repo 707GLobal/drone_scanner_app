@@ -1,8 +1,7 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- Base application theme. -->
-    <style name="Base.Theme.Drone_scanner" parent="Theme.Material3.DayNight.NoActionBar">
+    <!-- Base application theme（纯 Compose 应用：直接用框架主题，避免引入 material 组件库） -->
+    <style name="Base.Theme.Drone_scanner" parent="android:Theme.Material.Light.NoActionBar">
         <!-- Customize your light theme here. -->
-        <!-- <item name="colorPrimary">@color/my_light_primary</item> -->
     </style>
 
     <style name="Theme.Drone_scanner" parent="Base.Theme.Drone_scanner" />
