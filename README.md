@@ -7,7 +7,7 @@ Remote ID 广播（ASTM F3411 / ASD-STAN EN 4709-002），解包后在腾讯地�
 - 应用名：无人机检测
 - 包名：`com.global_707.drone_scanner`
 - 版本：v1.0.0
-- 语言：中文（UI 全中文）
+- 语言：中文
 
 > ⚠️ 本项目用于无线电频谱合法监测与安全研究。请遵守所在国家/地区的无线电与隐私法规，
 > 仅在你拥有合法权限的区域使用。
@@ -50,11 +50,6 @@ gradlew.bat assembleRelease    # 构建 release（minify + shrink）
 仓库本身**不包含**任何 release keystore。默认构建使用 Android 调试证书
 （`~/.android/debug.keystore`，`CN=Android Debug`）。正式发布前请自行生成并妥善保管
 **专属的 release keystore**，并在控制台重新绑定腾讯地图 Key（更换签名后旧 Key 会鉴权失败）。
-
-## 文档
-
-- `AGENTS.md` — 面向后续开发/AI 助手的项目速览（架构、代码地图、红线约定）。
-- `TESTING.md` — 手工功能测试矩阵。
 
 ## 开源许可
 
