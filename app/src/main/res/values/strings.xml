@@ -113,4 +113,6 @@
     <string name="demo_mode">演示模式</string>
     <string name="demo_mode_desc">无检测结果时显示示例数据（带"演示"标签），便于预览界面效果</string>
     <string name="github_repo">GitHub 仓库</string>
+    <string name="about_developer">开发者：707GLobal</string>
+    <string name="about_copyright">© 2026 707GLobal，保留所有权利</string>
 </resources>

@@ -503,7 +503,7 @@ fun AboutScreen(onBack: () -> Unit) {
             }
 
             Spacer(Modifier.height(24.dp))
-            // 版本信息：仅展示在关于我们页面底部
+            // 版本与署名信息：仅展示在关于我们页面底部
             Text(
                 text = stringResource(R.string.app_version),
                 style = DroneTypography.label,
@@ -511,6 +511,25 @@ fun AboutScreen(onBack: () -> Unit) {
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(vertical = 8.dp),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            )
+            // 开发者署名：开发留名，与版本号一同置于页脚
+            Text(
+                text = stringResource(R.string.about_developer),
+                style = DroneTypography.label,
+                color = colors.mutedForeground,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 4.dp),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            )
+            Text(
+                text = stringResource(R.string.about_copyright),
+                style = DroneTypography.caption,
+                color = colors.mutedForeground.copy(alpha = 0.6f),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 8.dp),
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
             )
         }
