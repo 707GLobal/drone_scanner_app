@@ -1,9 +1,7 @@
 *.iml
 .gradle
 /local.properties
-/.idea/*
-!/.idea/codeStyles/
-!/.idea/runConfigurations.xml
+/.idea/
 .DS_Store
 /build
 /captures
@@ -12,3 +10,6 @@
 .kotlin
 *.hprof
 local.properties
+
+# 内部开发文档，仅本地保留，不推送到公开仓库
+AGENTS.md
