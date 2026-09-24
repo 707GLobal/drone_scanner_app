@@ -34,10 +34,12 @@ import kotlin.math.sqrt
 
 /**
  * 真实 RID 扫描控制器：
- *  - 蓝牙：扫描 RID Service UUID（0xFFFA-0xFFFD）广播并完整解包（ASTM F3411）
- *  - WiFi：扫描带 ASTM OUI (FA-0B-9C) 制造商 IE 的信标（Android 16+）
+ *  - 蓝牙：扫描 RID Service UUID 广播并完整解包（ASTM F3411 / ASD-STAN / GB 42590）
+ *  - WiFi：解包信标厂商 IE 中的 RID Message Pack（OUI FA-0B-BC + Vendor Type 0x0D，Android 11+）
  *  - 同一设备的多次广播（序列号 / 位置 / 操作员分帧）会被合并
  *  - 扫描优先级（低/中/高）影响蓝牙扫描模式与功耗
+ *  - 扫描模式（[ScanMode]）：手机直扫用本机射频；连接外置天线时射频由板端负责，
+ *    手机只作显示端，数据经 [ingestExternal] 进入同一套累积与展示流程
  */
 object ScannerController {
 
@@ -80,6 +82,21 @@ object ScannerController {
     private const val WIFI_SCAN_INTERVAL_MS = 20_000L
     /** Wi-Fi scanResults 读取轮询间隔（毫秒） */
     private const val WIFI_RESULTS_READ_MS = 5000L
+
+    // ---------- Wi-Fi Beacon RID 厂商 IE ----------
+    /** 厂商自定义 IE 的 Element ID */
+    private const val VENDOR_IE_ID = 221
+
+    /** ASTM F3411 / ASD-STAN / GB 42590 在 Wi-Fi Beacon 上共用的 OUI */
+    private const val RID_OUI_0 = 0xFA
+    private const val RID_OUI_1 = 0x0B
+    private const val RID_OUI_2 = 0xBC
+
+    /** Wi-Fi Beacon 承载 RID 时的 Vendor Type */
+    private const val RID_VENDOR_TYPE = 0x0D
+
+    /** Wi-Fi 厂商 IE 中取出的 RID 载荷：counter 来自 IE 头部（25 字节消息内不含该字段） */
+    private class RidPayload(val messageCounter: Int, val data: ByteArray)
 
     /** UI 刷新节流窗口：BLE 高频回调合并为至多每 300ms 一次列表重建 + 地图重画 */
     private const val REFRESH_COALESCE_MS = 300L
@@ -141,6 +158,19 @@ object ScannerController {
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         refreshLocation(context)
         refreshSystemState(context)
+        AppLogger.i(
+            "Scan",
+            "start mode=${if (AppPrefs.scanMode == ScanMode.EXTERNAL) "external" else "internal"} " +
+                "bt=${AppPrefs.bluetoothScanEnabled} wifi=${AppPrefs.wifiScanEnabled} " +
+                "priority=${AppPrefs.scanPriority}",
+        )
+        // 外置天线模式：射频扫描由板端完成，手机不启动本机蓝牙/Wi-Fi 扫描，
+        // 只等待 [ingestExternal] 上报（未接入前列表为空，界面显示"等待外置设备"）
+        if (AppPrefs.scanMode == ScanMode.EXTERNAL) {
+            updateScanState()
+            refresh()
+            return
+        }
         if (AppPrefs.bluetoothScanEnabled) startBluetooth(context)
         if (AppPrefs.wifiScanEnabled) startWifi(context)
         updateScanState()
@@ -170,6 +200,9 @@ object ScannerController {
         bluetoothSystemOn = btOn
         wifiSystemOn = wifiOn
 
+        // 外置天线模式下本机射频通道不参与扫描，不做通道错误判定（否则会误报"系统未开启"）
+        if (AppPrefs.scanMode == ScanMode.EXTERNAL) return changed
+
         // 通道关闭时给出具体错误；重新开启时清除错误（扫描由调用方 restart 重建）
         if (!btOn) {
             if (AppPrefs.bluetoothScanEnabled) {
@@ -196,6 +229,7 @@ object ScannerController {
 
     @SuppressLint("MissingPermission")
     fun stop() {
+        if (running) AppLogger.i("Scan", "stop detected=${detected.size}")
         running = false
         refreshScheduled = false
         try {
@@ -262,14 +296,26 @@ object ScannerController {
         scanWindowPackets++
         if (isRid) scanWindowRid++
         if (now - scanWindowStart >= SCAN_LOG_WINDOW_MS) {
-            Log.d(
-                TAG,
-                "BLE 扫描 ${(now - scanWindowStart) / 1000}s：广播包=$scanWindowPackets RID命中=$scanWindowRid",
+            AppLogger.i(
+                "Scan",
+                "window source=ble elapsedMs=${now - scanWindowStart} " +
+                    "packets=$scanWindowPackets ridHits=$scanWindowRid",
             )
             scanWindowStart = now
             scanWindowPackets = 0
             scanWindowRid = 0
         }
+    }
+
+    /**
+     * 现场诊断：识别出 RID 承载、但一条消息都解不出来时，把原始字节写入日志
+     * （logcat 与日志文件同一行，见 AppLogger）。
+     *
+     * 用途：核对尚未支持的协议字节布局（例如国标变体）——真机抓一次即可定型，不要靠猜测。
+     * 与 RID 无关的普通广播不会走到这里，故不会刷屏。
+     */
+    private fun logUnparsedPayload(origin: String, messageCounter: Int?, data: ByteArray) {
+        AppLogger.hex("Decode", "raw_unparsed origin=$origin counter=${messageCounter ?: "—"}", data)
     }
 
     // ---------- 蓝牙 ----------
@@ -326,7 +372,7 @@ object ScannerController {
             }
 
             override fun onScanFailed(errorCode: Int) {
-                Log.w(TAG, "BLE 扫描失败 errorCode=$errorCode")
+                AppLogger.e("Ble", "scan_fail errorCode=$errorCode")
                 scanState = scanState.copy(
                     bluetoothScanning = false,
                     bluetoothErrorCode = errorCode,
@@ -336,10 +382,13 @@ object ScannerController {
         try {
             // filters 传 null = 全量扫描，是否 RID 由解析器判定
             scanner.startScan(null, settings, scanCallback)
-            Log.d(TAG, "BLE 扫描已启动（全量, phy=ALL, mode=${scanModeFor(AppPrefs.scanPriority)}）")
+            AppLogger.i(
+                "Ble",
+                "scan_start full_scan=true phy=ALL scanMode=${scanModeFor(AppPrefs.scanPriority)}",
+            )
             scanState = scanState.copy(bluetoothScanning = true, bluetoothErrorCode = null)
         } catch (e: Exception) {
-            Log.w(TAG, "启动 BLE 扫描失败: ${e.message}")
+            AppLogger.e("Ble", "scan_start_failed msg=${e.message}")
             scanCallback = null
             scanState = scanState.copy(
                 bluetoothScanning = false,
@@ -356,26 +405,84 @@ object ScannerController {
 
     private fun handleBluetoothResult(result: ScanResult) {
         val record = result.scanRecord ?: return
-        val rid = BluetoothRidParser.parse(record) ?: return
+        val rid = BluetoothRidParser.parse(record)
+        if (rid == null) {
+            // 带 RID Service UUID 却一条消息都解不出来：打印原始字节，供核对协议布局
+            BluetoothRidParser.rawServiceData(record).forEach { data ->
+                logUnparsedPayload("BLE", null, data)
+            }
+            return
+        }
         logScanWindow(isRid = true)
-        Log.d(
-            TAG,
-            "RID 命中 addr=${result.device.address} rssi=${result.rssi} " +
-                "serial=${rid.serialNumber ?: "—"} idType=${rid.idType ?: "—"} " +
-                "lat=${rid.latitude ?: "—"} lon=${rid.longitude ?: "—"}",
-        )
         // 统一以设备 MAC 为 key：同一设备 Basic ID / Location / Operator 分帧才能合并到
         // 同一条记录。若以 serial 为 key，先到 Location（无序列号）、后到 Basic ID（带
         // 序列号）会把同一设备分裂成两条记录，各自只含一半字段。
         val key = result.device.address.ifBlank { rid.serialNumber ?: "unknown" }
+        mergeInto("ble", key, rid, result.rssi)
+        requestRefresh()
+    }
+
+    /**
+     * 把一条已解析消息合并进累积表。
+     * 本机蓝牙、本机 Wi-Fi 与外置设备共用这一条入口，保证累积/合并语义一致；
+     * 同时在这里记录"首次发现"事件（三种来源共用同一套日志）。
+     */
+    private fun mergeInto(
+        source: String,
+        key: String,
+        message: BluetoothRidParser.RidMessage,
+        rssi: Int?,
+        protocolLabel: String? = null,
+        frequencyLabel: String? = null,
+    ) {
         val now = System.currentTimeMillis()
-        val device = synchronized(detected) {
+        var isNew = false
+        synchronized(detected) {
+            isNew = !detected.containsKey(key)
             detected.getOrPut(key) { DetectedDevice(key) }.also { d ->
-                d.merge(rid)
-                d.rssi = result.rssi
+                protocolLabel?.let { d.protocol = it }
+                frequencyLabel?.let { d.frequency = it }
+                d.merge(message)
+                if (rssi != null) d.rssi = rssi
                 d.lastSeen = now
             }
         }
+        if (isNew) {
+            AppLogger.i(
+                "Rid",
+                "drone_first source=$source key=$key rssi=${rssi ?: "—"} " +
+                    "serial=${message.serialNumber ?: "—"} idType=${message.idType ?: "—"} " +
+                    "lat=${message.latitude ?: "—"} lon=${message.longitude ?: "—"}",
+            )
+        }
+    }
+
+    // ---------- 外置设备接入点（预留） ----------
+
+    /**
+     * 外置设备（板端已完成射频扫描与 RID 解码）接入点。
+     *
+     * 外置天线模式下射频扫描由板端负责、手机仅作显示端，因此本入口收的是**已解码字段**
+     * 与少量元数据，而不是原始射频数据。后续接入 USB-CDC / BLE-NUS 时，从对端帧解出参数后
+     * 直接调用本函数，即可复用现有的累积合并、列表刷新与地图/详情展示，
+     * **无需改动解析层与任何 UI**。
+     *
+     * 建议对端帧内附带原始 RID 载荷（hex）：板端解析若有偏差，手机侧可复核，无需刷固件。
+     *
+     * @param deviceKey 无人机标识（优先用其 MAC；对端需保证同一架飞机稳定不变）
+     * @param message 已解码的 RID 字段
+     * @param protocolLabel 展示用协议标签（由调用方传资源文案，避免硬编码）
+     * @param frequencyLabel 展示用频段标签（同上）
+     * @param rssi 信号强度（对端上报值，未知传 null）
+     */
+    fun ingestExternal(
+        deviceKey: String,
+        message: BluetoothRidParser.RidMessage,
+        protocolLabel: String,
+        frequencyLabel: String,
+        rssi: Int? = null,
+    ) {
+        mergeInto("external", deviceKey, message, rssi, protocolLabel, frequencyLabel)
         requestRefresh()
     }
 
@@ -385,6 +492,7 @@ object ScannerController {
         wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
         if (wifiManager == null || wifiManager?.isWifiEnabled != true) {
             // Wi-Fi 不可用或未开启
+            AppLogger.w("Wifi", "channel_unavailable")
             scanState = scanState.copy(
                 wifiScanning = false,
                 wifiErrorCode = ScanState.WIFI_ERR_UNAVAILABLE,
@@ -394,10 +502,10 @@ object ScannerController {
         wifiManager?.let {
             scanState = scanState.copy(wifiScanning = true, wifiErrorCode = null)
         }
+        AppLogger.i("Wifi", "scan_start intervalMs=$WIFI_SCAN_INTERVAL_MS readMs=$WIFI_RESULTS_READ_MS")
         wifiJob = scope?.launch {
-            // 注意：RID over Wi-Fi 的主流承载是 Wi-Fi Aware (NAN) / Beacon 广播，
-            // 本通道只能发现以 AP/Beacon 模式广播 ASTM OUI（FA-0B-9C）的信标（Android 16+），
-            // NAN 广播不会出现在 WifiManager.scanResults 中。
+            // 注意：RID over Wi-Fi 的主流承载是 Wi-Fi Aware (NAN) / Beacon 广播，本通道只能解析
+            // 以 AP/Beacon 模式广播 RID 厂商 IE 的信标；NAN 广播不会出现在 WifiManager.scanResults 中。
             // Android 对 startScan 有系统级节流（后台约 20s+ 一次，13+ 更严），高频调用会被
             // 系统静默忽略并持续返回陈旧结果，故按节流间隔低频触发 + 周期性读取结果缓存。
             var lastScanAt = 0L
@@ -409,10 +517,10 @@ object ScannerController {
                         @Suppress("DEPRECATION")
                         val accepted = wifiManager?.startScan()
                         if (accepted == false) {
-                            Log.w(TAG, "WifiManager.startScan 被系统拒绝（节流/权限），按间隔重试")
+                            AppLogger.w("Wifi", "scan_reject（系统节流/权限），按间隔重试")
                         }
                     } catch (e: Exception) {
-                        Log.w(TAG, "WifiManager.startScan 异常: ${e.message}")
+                        AppLogger.w("Wifi", "scan_error msg=${e.message}")
                     }
                 }
                 delay(WIFI_RESULTS_READ_MS)
@@ -421,27 +529,32 @@ object ScannerController {
                 } catch (_: SecurityException) {
                     emptyList()
                 }
-                val nowMs = System.currentTimeMillis()
                 var wifiRidHits = 0
                 results.forEach { result ->
-                    if (hasRidOui(result)) {
-                        wifiRidHits++
-                        val key = "wifi:" + (result.BSSID ?: result.SSID)
-                        synchronized(detected) {
-                            detected.getOrPut(key) {
-                                DetectedDevice(key).apply {
-                                    protocol = "WiFi RID"
-                                    frequency = bandOf(result.frequency)
-                                }
-                            }.also { d ->
-                                d.rssi = result.level
-                                d.lastSeen = nowMs
-                            }
-                        }
+                    val rid = ridPayloadOf(result) ?: return@forEach
+                    val messages = BluetoothRidParser.parseMessages(rid.data)
+                    if (messages.isEmpty()) {
+                        logUnparsedPayload("WiFi bssid=${result.BSSID}", rid.messageCounter, rid.data)
+                        return@forEach
                     }
+                    wifiRidHits++
+                    val key = "wifi:" + (result.BSSID ?: result.SSID)
+                    // 厂商 IE 头部的 MessageCounter 并入消息（25 字节消息内不含该字段）
+                    val merged = messages.fold(
+                        BluetoothRidParser.RidMessage(messageCounter = rid.messageCounter),
+                    ) { acc, m -> acc.merge(m) }
+                    // 与本机蓝牙/外置设备共用同一入口（含 drone_first 日志）
+                    mergeInto(
+                        source = "wifi_beacon",
+                        key = key,
+                        message = merged,
+                        rssi = result.level,
+                        protocolLabel = "WiFi RID",
+                        frequencyLabel = bandOf(result.frequency),
+                    )
                 }
                 if (wifiRidHits > 0) {
-                    Log.d(TAG, "Wi-Fi RID 命中 ${wifiRidHits} 个信标")
+                    AppLogger.i("Wifi", "window beacons=$results.size ridHits=$wifiRidHits")
                 }
                 refresh()
             }
@@ -449,30 +562,47 @@ object ScannerController {
     }
 
     /**
-     * ASTM F3411 WiFi RID：制造商 IE（ID 221）携带 OUI FA-0B-9C。
-     * 注意：API 36 起信息元素类型为 ScanResult.InformationElement（getId/getBytes），
-     * 旧版本类型不同（WifiInformationElement），为避免版本兼容问题仅在 API 36+ 检测。
+     * 从 Wi-Fi 信标中取出 RID 载荷。
+     *
+     * ASTM F3411 / ASD-STAN / GB 42590 的 Wi-Fi Beacon 承载统一为厂商 IE（Element ID 221），
+     * 内容为 [OUI FA-0B-BC][Vendor Type 0x0D][MessageCounter 1B][Message Pack]。
+     * 返回跳过前 5 字节后的 Message Pack 载荷；非 RID 信标返回 null。
+     *
+     * IE 访问形态自 API 30 起即为 InformationElement.getId()/getBytes()，无需按版本分支。
      */
-    private fun hasRidOui(result: WifiScanResult): Boolean {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) return false
+    private fun ridPayloadOf(result: WifiScanResult): RidPayload? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
         val elements = try {
             result.informationElements
         } catch (_: Exception) {
-            return false
+            return null
         }
-        return elements.any { element ->
+        for (element in elements) {
             try {
-                if (element.getId() != 221) return@any false
+                if (element.getId() != VENDOR_IE_ID) continue
+                // getBytes() 返回 IE 内容（不含 Element ID / Length），首字节即 OUI 第 1 字节
                 val payload = element.getBytes()
-                if (payload.remaining() < 3) return@any false
-                val b0 = payload.get(0).toInt() and 0xFF
-                val b1 = payload.get(1).toInt() and 0xFF
-                val b2 = payload.get(2).toInt() and 0xFF
-                b0 == 0xFA && b1 == 0x0B && b2 == 0x9C
+                if (payload.remaining() < 5) continue
+                val base = payload.position()
+                val oui0 = payload.get(base).toInt() and 0xFF
+                val oui1 = payload.get(base + 1).toInt() and 0xFF
+                val oui2 = payload.get(base + 2).toInt() and 0xFF
+                val vendorType = payload.get(base + 3).toInt() and 0xFF
+                if (oui0 != RID_OUI_0 || oui1 != RID_OUI_1 || oui2 != RID_OUI_2) continue
+                if (vendorType != RID_VENDOR_TYPE) continue
+
+                val messageCounter = payload.get(base + 4).toInt() and 0xFF
+                val data = ByteArray(payload.remaining() - 5)
+                for (i in data.indices) {
+                    data[i] = payload.get(base + 5 + i)
+                }
+                if (data.isEmpty()) continue
+                return RidPayload(messageCounter, data)
             } catch (_: Exception) {
-                false
+                // 单个 IE 异常不影响同一信标内的其他 IE
             }
         }
+        return null
     }
 
     private fun bandOf(frequencyMHz: Int): String = when {

@@ -2,6 +2,7 @@ package com.global_707.drone_scanner.ui.theme
 
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -35,7 +36,7 @@ private val LightColorScheme = lightColorScheme(
     surfaceDim = LightDroneColors.muted,
 )
 
-private val DarkColorScheme = lightColorScheme(
+private val DarkColorScheme = darkColorScheme(
     primary = DarkDroneColors.primary,
     onPrimary = DarkDroneColors.primaryForeground,
     background = DarkDroneColors.background,

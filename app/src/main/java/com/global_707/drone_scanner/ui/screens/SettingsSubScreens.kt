@@ -1,6 +1,12 @@
 package com.global_707.drone_scanner.ui.screens
 
 import android.content.Context
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -27,10 +33,14 @@ import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -48,6 +58,7 @@ import com.global_707.drone_scanner.R
 import com.global_707.drone_scanner.data.AppPrefs
 import com.global_707.drone_scanner.data.DeviceCapabilities
 import com.global_707.drone_scanner.data.ScanPriority
+import com.global_707.drone_scanner.data.ScanMode
 import com.global_707.drone_scanner.data.ScannerController
 import com.global_707.drone_scanner.ui.components.RadarGlyph
 import com.global_707.drone_scanner.ui.components.SectionCard
@@ -78,10 +89,25 @@ fun SearchSettingsScreen(onBack: () -> Unit) {
             delay(2000)
         }
     }
-    val wifiNanSupported by produceState(initialValue = DeviceCapabilities.wifiNanSupported(context)) {
+    // Wi-Fi 通道的实际门槛：API 30+ 且有 Wi-Fi 硬件（信标厂商 IE 才可读）
+    val wifiBeaconSupported by produceState(
+        initialValue = DeviceCapabilities.wifiBeaconRidSupported(context),
+    ) {
         while (isActive) {
-            value = DeviceCapabilities.wifiNanSupported(context)
+            value = DeviceCapabilities.wifiBeaconRidSupported(context)
             delay(2000)
+        }
+    }
+
+    // 本机不支持的能力：强制关闭对应扫描通道并持久化（开关置灰、不可开启，原因见能力行）
+    LaunchedEffect(bt4Supported) {
+        if (!bt4Supported && AppPrefs.bluetoothScanEnabled) {
+            AppPrefs.saveBluetoothScanEnabled(false)
+        }
+    }
+    LaunchedEffect(wifiBeaconSupported) {
+        if (!wifiBeaconSupported && AppPrefs.wifiScanEnabled) {
+            AppPrefs.saveWifiScanEnabled(false)
         }
     }
 
@@ -97,94 +123,166 @@ fun SearchSettingsScreen(onBack: () -> Unit) {
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 16.dp),
         ) {
-            // ---- 蓝牙扫描 ----
-            GroupTitle(title = stringResource(R.string.scan_group_bluetooth))
+            // ---- 扫描模式：顶部滑块（手机直连 / 外置天线）----
+            GroupTitle(title = stringResource(R.string.scan_source_title))
             Spacer(Modifier.height(12.dp))
             SectionCard {
-                FeatureRow(
-                    icon = AppIcons.Bluetooth,
-                    label = stringResource(R.string.scan_bluetooth),
-                    checked = AppPrefs.bluetoothScanEnabled,
-                    onCheckedChange = { value ->
-                        AppPrefs.saveBluetoothScanEnabled(value)
-                        ScannerController.restart(context)
-                    },
-                )
-                Spacer(Modifier.height(14.dp))
-                CapabilityStatusRow(
-                    supported = bt4Supported,
-                    title = stringResource(R.string.bt4_legacy_supported),
-                    description = stringResource(R.string.bt4_legacy_desc),
-                )
-                Spacer(Modifier.height(14.dp))
-                CapabilityStatusRow(
-                    supported = bt5Supported,
-                    title = stringResource(R.string.bt5_extended_supported),
-                    description = stringResource(R.string.bt5_extended_desc),
-                )
-            }
-
-            Spacer(Modifier.height(16.dp))
-
-            // 扫描优先级（M3 原生下拉，修改后立即重启扫描）
-            SectionCard {
-                ScanPrioritySelector()
+                ScanSourceSelector()
                 Spacer(Modifier.height(10.dp))
                 Text(
                     text = stringResource(
-                        R.string.scan_mode_current,
-                        stringResource(
-                            when (AppPrefs.scanPriority) {
-                                ScanPriority.LOW -> R.string.scan_mode_low_power
-                                ScanPriority.NORMAL -> R.string.scan_mode_balanced
-                                else -> R.string.scan_mode_low_latency
-                            },
-                        ),
+                        if (AppPrefs.scanMode == ScanMode.EXTERNAL) {
+                            R.string.scan_source_external_desc
+                        } else {
+                            R.string.scan_source_internal_desc
+                        },
                     ),
                     style = DroneTypography.label,
-                    color = colors.mutedForeground,
-                )
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    text = stringResource(R.string.scan_priority_desc),
-                    style = DroneTypography.caption,
                     color = colors.mutedForeground,
                 )
             }
 
             Spacer(Modifier.height(24.dp))
 
-            // ---- Wi-Fi 扫描 ----
-            GroupTitle(title = stringResource(R.string.scan_group_wifi))
-            Spacer(Modifier.height(12.dp))
-            SectionCard {
-                FeatureRow(
-                    icon = AppIcons.Wifi,
-                    label = stringResource(R.string.scan_wifi),
-                    checked = AppPrefs.wifiScanEnabled,
-                    onCheckedChange = { value ->
-                        AppPrefs.saveWifiScanEnabled(value)
-                        ScannerController.restart(context)
-                    },
-                )
-                Spacer(Modifier.height(14.dp))
-                CapabilityStatusRow(
-                    supported = wifiNanSupported,
-                    title = if (wifiNanSupported) {
-                        stringResource(R.string.wifi_nan_supported)
-                    } else {
-                        stringResource(R.string.wifi_nan_not_supported)
-                    },
-                    description = stringResource(R.string.wifi_nan_desc),
-                )
+            // ---- 手机直连：本机射频相关设置（M3 原生过渡动画切换显隐）----
+            AnimatedVisibility(
+                visible = AppPrefs.scanMode == ScanMode.INTERNAL,
+                enter = fadeIn(tween(220)) + expandVertically(tween(220)),
+                exit = fadeOut(tween(140)) + shrinkVertically(tween(180)),
+            ) {
+                Column {
+                    GroupTitle(title = stringResource(R.string.scan_group_bluetooth))
+                    Spacer(Modifier.height(12.dp))
+                    SectionCard {
+                        FeatureRow(
+                            icon = AppIcons.Bluetooth,
+                            label = stringResource(R.string.scan_bluetooth),
+                            checked = AppPrefs.bluetoothScanEnabled && bt4Supported,
+                            onCheckedChange = { value ->
+                                AppPrefs.saveBluetoothScanEnabled(value)
+                                ScannerController.restart(context)
+                            },
+                            // 本机不支持时置灰不可开启（偏好值已被上面的 LaunchedEffect 强制关闭）
+                            enabled = bt4Supported,
+                        )
+                        Spacer(Modifier.height(14.dp))
+                        CapabilityStatusRow(
+                            supported = bt4Supported,
+                            title = stringResource(
+                                if (bt4Supported) R.string.cap_bt4_title else R.string.cap_bt4_title_no,
+                            ),
+                            description = stringResource(
+                                if (bt4Supported) R.string.cap_bt4_desc else R.string.cap_bt4_reason,
+                            ),
+                        )
+                        Spacer(Modifier.height(14.dp))
+                        CapabilityStatusRow(
+                            supported = bt5Supported,
+                            title = stringResource(
+                                if (bt5Supported) R.string.cap_bt5_title else R.string.cap_bt5_title_no,
+                            ),
+                            description = stringResource(
+                                if (bt5Supported) R.string.cap_bt5_desc else R.string.cap_bt5_reason,
+                            ),
+                        )
+                    }
+
+                    Spacer(Modifier.height(16.dp))
+
+                    // 扫描优先级（M3 原生下拉，修改后立即重启扫描）
+                    SectionCard {
+                        ScanPrioritySelector()
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            text = stringResource(
+                                R.string.scan_mode_current,
+                                stringResource(
+                                    when (AppPrefs.scanPriority) {
+                                        ScanPriority.LOW -> R.string.scan_mode_low_power
+                                        ScanPriority.NORMAL -> R.string.scan_mode_balanced
+                                        else -> R.string.scan_mode_low_latency
+                                    },
+                                ),
+                            ),
+                            style = DroneTypography.label,
+                            color = colors.mutedForeground,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text = stringResource(R.string.scan_priority_desc),
+                            style = DroneTypography.caption,
+                            color = colors.mutedForeground,
+                        )
+                    }
+
+                    Spacer(Modifier.height(24.dp))
+
+                    GroupTitle(title = stringResource(R.string.scan_group_wifi))
+                    Spacer(Modifier.height(12.dp))
+                    SectionCard {
+                        FeatureRow(
+                            icon = AppIcons.Wifi,
+                            label = stringResource(R.string.scan_wifi),
+                            checked = AppPrefs.wifiScanEnabled && wifiBeaconSupported,
+                            onCheckedChange = { value ->
+                                AppPrefs.saveWifiScanEnabled(value)
+                                ScannerController.restart(context)
+                            },
+                            enabled = wifiBeaconSupported,
+                        )
+                        Spacer(Modifier.height(14.dp))
+                        CapabilityStatusRow(
+                            supported = wifiBeaconSupported,
+                            title = stringResource(
+                                if (wifiBeaconSupported) {
+                                    R.string.cap_wifi_title
+                                } else {
+                                    R.string.cap_wifi_title_no
+                                },
+                            ),
+                            description = stringResource(
+                                if (wifiBeaconSupported) R.string.cap_wifi_desc else R.string.cap_wifi_reason,
+                            ),
+                        )
+                    }
+                }
+            }
+
+            // ---- 外置天线：相关选项内容预留（后续接入 USB / 蓝牙链路时替换为真实控件）----
+            AnimatedVisibility(
+                visible = AppPrefs.scanMode == ScanMode.EXTERNAL,
+                enter = fadeIn(tween(220)) + expandVertically(tween(220)),
+                exit = fadeOut(tween(140)) + shrinkVertically(tween(180)),
+            ) {
+                Column {
+                    GroupTitle(title = stringResource(R.string.scan_group_external))
+                    Spacer(Modifier.height(12.dp))
+                    SectionCard {
+                        PlaceholderRow(
+                            label = stringResource(R.string.external_option_connect),
+                            value = stringResource(R.string.external_option_connect_value),
+                        )
+                        Spacer(Modifier.height(14.dp))
+                        PlaceholderRow(
+                            label = stringResource(R.string.external_option_status),
+                            value = stringResource(R.string.scan_external_not_connected),
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            text = stringResource(R.string.scan_external_hint),
+                            style = DroneTypography.label,
+                            color = colors.mutedForeground,
+                        )
+                    }
+                }
             }
         }
     }
 }
 
-/** 分组标题（参考原型图：标题 + 贯穿下划线） */
+/** 分组标题（参考原型图：标题 + 贯穿下划线）；日志设置页复用 */
 @Composable
-private fun GroupTitle(title: String) {
+internal fun GroupTitle(title: String) {
     val colors = LocalDroneColors.current
     Column {
         Text(
@@ -197,13 +295,14 @@ private fun GroupTitle(title: String) {
     }
 }
 
-/** 特性行：图标方块 + 名称 + 开关 */
+/** 特性行：图标方块 + 名称 + 开关（[enabled] 为 false 时仅置灰，偏好值仍保留） */
 @Composable
 private fun FeatureRow(
     icon: ImageVector,
     label: String,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
+    enabled: Boolean = true,
 ) {
     val colors = LocalDroneColors.current
     Row(
@@ -214,13 +313,13 @@ private fun FeatureRow(
             Modifier
                 .size(52.dp)
                 .clip(RoundedCornerShape(14.dp))
-                .background(colors.primary.copy(alpha = 0.12f)),
+                .background(colors.primary.copy(alpha = if (enabled) 0.12f else 0.06f)),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = colors.primary,
+                tint = if (enabled) colors.primary else colors.mutedForeground,
                 modifier = Modifier.size(26.dp),
             )
         }
@@ -228,17 +327,82 @@ private fun FeatureRow(
         Text(
             text = label,
             style = DroneTypography.body,
-            color = colors.foreground,
+            color = if (enabled) colors.foreground else colors.mutedForeground,
             modifier = Modifier.weight(1f),
         )
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,
+            enabled = enabled,
             colors = SwitchDefaults.colors(
                 checkedTrackColor = colors.primary,
                 uncheckedTrackColor = colors.muted,
                 uncheckedThumbColor = colors.card,
             ),
+        )
+    }
+}
+
+/**
+ * 扫描模式选择：M3 原生分段控件（手机直扫 / 连接外置天线）。
+ * 切换后立即重启扫描；因扫描只在首页运行，在设置页内该调用为空操作，
+ * 返回首页时按新模式启动。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ScanSourceSelector() {
+    val colors = LocalDroneColors.current
+    val context = LocalContext.current
+    val options = listOf(
+        ScanMode.INTERNAL to stringResource(R.string.scan_source_internal),
+        ScanMode.EXTERNAL to stringResource(R.string.scan_source_external),
+    )
+
+    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+        options.forEachIndexed { index, (mode, label) ->
+            SegmentedButton(
+                selected = AppPrefs.scanMode == mode,
+                onClick = {
+                    AppPrefs.saveScanMode(mode)
+                    ScannerController.restart(context)
+                },
+                shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
+                colors = SegmentedButtonDefaults.colors(
+                    activeContainerColor = colors.primary,
+                    activeContentColor = colors.primaryForeground,
+                    inactiveContainerColor = colors.card,
+                    inactiveContentColor = colors.foreground,
+                    activeBorderColor = colors.primary,
+                    inactiveBorderColor = colors.border,
+                ),
+            ) {
+                Text(text = label, style = DroneTypography.label)
+            }
+        }
+    }
+}
+
+/**
+ * 预留项行：左标签 + 右取值。
+ * 外置天线相关选项尚未接入，先用只读占位，避免出现"点了没反应"的控件。
+ */
+@Composable
+private fun PlaceholderRow(label: String, value: String) {
+    val colors = LocalDroneColors.current
+    Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            style = DroneTypography.body,
+            color = colors.foreground,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            text = value,
+            style = DroneTypography.label,
+            color = colors.mutedForeground,
         )
     }
 }

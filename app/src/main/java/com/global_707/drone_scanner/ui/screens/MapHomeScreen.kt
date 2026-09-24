@@ -9,6 +9,7 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
@@ -75,10 +76,10 @@ import com.global_707.drone_scanner.R
 import com.global_707.drone_scanner.data.AppPrefs
 import com.global_707.drone_scanner.data.Drone
 import com.global_707.drone_scanner.data.DroneStatus
+import com.global_707.drone_scanner.data.ScanMode
 import com.global_707.drone_scanner.data.ScanState
 import com.global_707.drone_scanner.data.ScannerController
 import com.global_707.drone_scanner.ui.components.FrostedPill
-import com.global_707.drone_scanner.ui.components.ScanningSpinner
 import com.global_707.drone_scanner.ui.components.StatusDot
 import com.global_707.drone_scanner.ui.map.DroneMap
 import com.global_707.drone_scanner.ui.map.LocateTarget
@@ -144,8 +145,10 @@ fun MapHomeScreen(
     }
 
     // 系统开关提醒：设置中启用的扫描通道，但系统蓝牙/Wi-Fi 未开启 → 弹窗引导开启
-    val needBluetooth = AppPrefs.bluetoothScanEnabled && !ScannerController.bluetoothSystemOn
-    val needWifi = AppPrefs.wifiScanEnabled && !ScannerController.wifiSystemOn
+    // 外置天线模式下手机射频不参与扫描，不做该提醒
+    val internalMode = AppPrefs.scanMode == ScanMode.INTERNAL
+    val needBluetooth = internalMode && AppPrefs.bluetoothScanEnabled && !ScannerController.bluetoothSystemOn
+    val needWifi = internalMode && AppPrefs.wifiScanEnabled && !ScannerController.wifiSystemOn
     var reminderDismissed by remember { mutableStateOf(false) }
     val systemOk = !needBluetooth && !needWifi
     // 系统恢复后重置"暂不"标记，下次再关闭时重新提醒
@@ -183,6 +186,8 @@ fun MapHomeScreen(
             showOperator = false,
             showMyLocation = true,
             showLabels = true,
+            // 首页/返回首页时默认定位到本机位置（详情页不传，定位到无人机）
+            centerOnMyLocationOnce = true,
             modifier = Modifier.fillMaxSize(),
         )
 
@@ -325,6 +330,10 @@ private fun scanStatusInfo(permissionsGranted: Boolean): Pair<String, Color> {
     val colors = LocalDroneColors.current
     val state = ScannerController.scanState
     return when {
+        // 外置天线模式：手机不扫射频，等待板端设备接入（权限与通道状态均不适用）
+        AppPrefs.scanMode == ScanMode.EXTERNAL ->
+            stringResource(R.string.scan_status_external_wait) to colors.mutedForeground
+
         !permissionsGranted ->
             stringResource(R.string.scan_status_perm) to colors.danger
 
@@ -396,6 +405,8 @@ private fun ScanStatusPanel(
             .width(240.dp)
             .clip(RoundedCornerShape(12.dp))
             .background(colors.card)
+            // 模式切换时面板高度变化走原生尺寸动画
+            .animateContentSize()
             .padding(horizontal = 14.dp, vertical = 12.dp),
     ) {
         // 权限不足提示
@@ -433,58 +444,112 @@ private fun ScanStatusPanel(
             )
         }
 
-        // Wi-Fi 通道
-        ChannelStatusRow(
-            icon = AppIcons.Wifi,
-            isBluetooth = false,
-            label = stringResource(R.string.scan_wifi),
-            enabled = AppPrefs.wifiScanEnabled,
-            scanning = state.wifiScanning,
-            errorCode = state.wifiErrorCode,
+        // 当前扫描模式标题
+        Text(
+            text = stringResource(
+                if (AppPrefs.scanMode == ScanMode.EXTERNAL) {
+                    R.string.scan_source_external
+                } else {
+                    R.string.scan_source_internal
+                },
+            ),
+            style = DroneTypography.captionMedium,
+            color = colors.foreground,
         )
         HorizontalDivider(
             modifier = Modifier.padding(vertical = 10.dp),
             thickness = 1.dp,
             color = colors.border,
         )
-        // 蓝牙通道
-        ChannelStatusRow(
-            icon = AppIcons.Bluetooth,
-            isBluetooth = true,
-            label = stringResource(R.string.scan_bluetooth),
-            enabled = AppPrefs.bluetoothScanEnabled,
-            scanning = state.bluetoothScanning,
-            errorCode = state.bluetoothErrorCode,
-        )
 
-        // 扫描异常：给出解决方案并跳转搜索设置
-        if (state.hasError || !AppPrefs.wifiScanEnabled || !AppPrefs.bluetoothScanEnabled) {
+        if (AppPrefs.scanMode == ScanMode.EXTERNAL) {
+            // 外置天线：相关选项内容预留，当前只显示连接状态
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = stringResource(R.string.scan_channel_external),
+                    style = DroneTypography.captionMedium,
+                    color = colors.foreground,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = stringResource(R.string.scan_external_not_connected),
+                    style = DroneTypography.label,
+                    color = colors.mutedForeground,
+                )
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = stringResource(R.string.scan_external_hint),
+                style = DroneTypography.label,
+                color = colors.mutedForeground,
+            )
+            Spacer(Modifier.height(10.dp))
+            GotoSearchSettingsButton(onClick = onOpenSearchSettings)
+        } else {
+            // Wi-Fi 通道
+            ChannelStatusRow(
+                icon = AppIcons.Wifi,
+                isBluetooth = false,
+                label = stringResource(R.string.scan_wifi),
+                enabled = AppPrefs.wifiScanEnabled,
+                scanning = state.wifiScanning,
+                errorCode = state.wifiErrorCode,
+            )
             HorizontalDivider(
                 modifier = Modifier.padding(vertical = 10.dp),
                 thickness = 1.dp,
                 color = colors.border,
             )
-            Text(
-                text = stringResource(R.string.scan_panel_solution),
-                style = DroneTypography.label,
-                color = colors.mutedForeground,
+            // 蓝牙通道
+            ChannelStatusRow(
+                icon = AppIcons.Bluetooth,
+                isBluetooth = true,
+                label = stringResource(R.string.scan_bluetooth),
+                enabled = AppPrefs.bluetoothScanEnabled,
+                scanning = state.bluetoothScanning,
+                errorCode = state.bluetoothErrorCode,
             )
-            Spacer(Modifier.height(8.dp))
-            Row(
-                Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(colors.primary)
-                    .clickable(onClick = onOpenSearchSettings)
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = stringResource(R.string.goto_search_settings),
-                    style = DroneTypography.label,
-                    color = colors.primaryForeground,
+
+            // 扫描异常时追加解决方案说明
+            if (state.hasError || !AppPrefs.wifiScanEnabled || !AppPrefs.bluetoothScanEnabled) {
+                HorizontalDivider(
+                    modifier = Modifier.padding(vertical = 10.dp),
+                    thickness = 1.dp,
+                    color = colors.border,
                 )
+                Text(
+                    text = stringResource(R.string.scan_panel_solution),
+                    style = DroneTypography.label,
+                    color = colors.mutedForeground,
+                )
+                Spacer(Modifier.height(8.dp))
             }
+            Spacer(Modifier.height(10.dp))
+            GotoSearchSettingsButton(onClick = onOpenSearchSettings)
         }
+    }
+}
+
+/** 「前往搜索设置」按钮（扫描状态面板内共用） */
+@Composable
+private fun GotoSearchSettingsButton(onClick: () -> Unit) {
+    val colors = LocalDroneColors.current
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(colors.primary)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = stringResource(R.string.goto_search_settings),
+            style = DroneTypography.label,
+            color = colors.primaryForeground,
+        )
     }
 }
 
@@ -523,7 +588,13 @@ private fun ChannelStatusRow(
                 color = colors.mutedForeground,
             )
 
-            scanning -> ScanningSpinner(size = 14.dp)
+            scanning -> Text(
+                text = stringResource(
+                    if (isBluetooth) R.string.bluetooth_scanning else R.string.wifi_scanning,
+                ),
+                style = DroneTypography.label,
+                color = colors.success,
+            )
 
             errorCode != null -> Text(
                 text = channelErrorText(isBluetooth = isBluetooth, errorCode = errorCode),
@@ -746,6 +817,9 @@ private fun DroneListItem(drone: Drone, onClick: () -> Unit, modifier: Modifier 
 // ---------- 权限辅助 ----------
 
 private fun neededPermissions(): List<String> = buildList {
+    // 外置天线模式：射频扫描由板端负责，本机无需附近设备 / 定位权限
+    // （返回空表时 checkAllPermissions 天然为 true，首页不会卡在权限门槛上）
+    if (AppPrefs.scanMode == ScanMode.EXTERNAL) return@buildList
     add(Manifest.permission.ACCESS_FINE_LOCATION)
     add(Manifest.permission.ACCESS_COARSE_LOCATION)
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {

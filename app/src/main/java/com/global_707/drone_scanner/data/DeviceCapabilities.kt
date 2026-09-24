@@ -2,7 +2,8 @@ package com.global_707.drone_scanner.data
 
 import android.bluetooth.BluetoothManager
 import android.content.Context
-import android.net.wifi.aware.WifiAwareManager
+import android.content.pm.PackageManager
+import android.os.Build
 
 /**
  * 本机 RID 检测能力检测（搜索设置页展示"supported / not supported"状态）。
@@ -38,13 +39,14 @@ object DeviceCapabilities {
         }
     }
 
-    /** Wi-Fi NAN（Wi-Fi Aware）：RID over Wi-Fi 的关键通道 */
-    fun wifiNanSupported(context: Context): Boolean {
-        return try {
-            val aware = context.getSystemService(WifiAwareManager::class.java)
-            aware?.isAvailable == true
-        } catch (_: Exception) {
-            false
-        }
+    /**
+     * Wi-Fi 信标 RID 解析能力（本 App Wi-Fi 通道的实际门槛）。
+     *
+     * RID 的 Wi-Fi 承载是信标（Beacon）厂商 IE，读取 IE 需要 API 30+
+     * 的 `ScanResult.InformationElement.getId()/getBytes()`，且本机需有 Wi-Fi 硬件。
+     */
+    fun wifiBeaconRidSupported(context: Context): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return false
+        return context.packageManager.hasSystemFeature(PackageManager.FEATURE_WIFI)
     }
 }

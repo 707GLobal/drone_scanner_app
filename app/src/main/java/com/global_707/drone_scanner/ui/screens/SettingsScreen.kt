@@ -16,6 +16,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Search
@@ -47,6 +48,7 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onSearchSettings: () -> Unit = {},
     onDisplaySettings: () -> Unit = {},
+    onLogSettings: () -> Unit = {},
     onAbout: () -> Unit = {},
 ) {
     val colors = LocalDroneColors.current
@@ -77,6 +79,11 @@ fun SettingsScreen(
                     icon = Icons.Filled.Settings,
                     label = stringResource(R.string.display_settings),
                     onClick = onDisplaySettings,
+                )
+                SettingRow(
+                    icon = Icons.AutoMirrored.Filled.List,
+                    label = stringResource(R.string.log_settings),
+                    onClick = onLogSettings,
                     showDivider = false,
                 )
             }

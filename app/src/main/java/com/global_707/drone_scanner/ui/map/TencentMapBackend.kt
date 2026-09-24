@@ -62,6 +62,12 @@ import kotlin.math.sqrt
  */
 object TencentMapBackend : MapBackend {
 
+    /**
+     * 首页入口等待本机定位结果的上限（毫秒）。
+     * 超时后按"无本机定位"继续，避免定位迟迟无回调时相机一直不动。
+     */
+    private const val ENTRY_LOCATION_WAIT_MS = 2_000L
+
     @Volatile
     private var tencentMap: TencentMap? = null
 
@@ -114,12 +120,19 @@ object TencentMapBackend : MapBackend {
         showOperator: Boolean,
         showMyLocation: Boolean,
         showLabels: Boolean,
+        centerOnMyLocationOnce: Boolean,
         modifier: Modifier,
     ) {
         val context = LocalContext.current
         val lifecycleOwner = LocalLifecycleOwner.current
         val mapView = remember { MapView(context) }
         var cameraMoved by remember { mutableStateOf(false) }
+        // 入口相机决策只做一次：首页=本机位置，详情页/全屏页=无人机
+        var initialCentered by remember { mutableStateOf(false) }
+        // 本轮首架无人机坐标（由 applyMap 回填，供入口相机决策使用）
+        var firstDroneLatLng by remember { mutableStateOf<LatLng?>(null) }
+        // 本机定位是否已出结果（成功或失败都算），首页入口决策需要等它
+        var locationResolved by remember { mutableStateOf(false) }
         var lastDrawn by remember { mutableStateOf<DrawSignature?>(null) }
         // 我的位置（主动定位，异步获取后刷新标记；含指南针朝向）
         var myPosition by remember { mutableStateOf<MyPosition?>(null) }
@@ -137,6 +150,8 @@ object TencentMapBackend : MapBackend {
             } else {
                 myPosition = null
             }
+            // 无论有没有结果都标记为"已出结果"，避免入口决策一直等待
+            locationResolved = true
         }
 
         // 方向传感器（罗盘）：实时驱动我的位置指向箭头
@@ -247,9 +262,11 @@ object TencentMapBackend : MapBackend {
                         myPosition = if (showMyLocation) myPosition else null,
                         showLabels = showLabels,
                     ) { first ->
-                        // 首次加载：移动相机到第一架飞机，保证标记可见
-                        if (!cameraMoved) {
-                            map.moveCamera(CameraUpdateFactory.newLatLngZoom(first, 14f))
+                        firstDroneLatLng = first
+                        // 入口相机决策完成后再跟随"新出现"的无人机，避免与入口定位抢占相机；
+                        // 入口时就已存在的无人机由下面的入口决策统一处理
+                        if (initialCentered && !cameraMoved) {
+                            map.animateCamera(CameraUpdateFactory.newLatLngZoom(first, 14f))
                             cameraMoved = true
                         }
                     }
@@ -266,6 +283,26 @@ object TencentMapBackend : MapBackend {
                         delay(100)
                     }
                 }
+            }
+
+            // 入口相机定位（只决策一次）：
+            //  - 首页（centerOnMyLocationOnce=true）：优先本机位置；等定位出结果，最多等
+            //    ENTRY_LOCATION_WAIT_MS 后按"无本机定位"继续；本机定位稍后到达时本 effect 会重跑
+            //  - 详情页/全屏页（false）：直接定位到该架无人机
+            LaunchedEffect(mapReady, locationResolved, myPosition, firstDroneLatLng) {
+                if (!mapReady || initialCentered) return@LaunchedEffect
+                val map = mapView.getMap() ?: return@LaunchedEffect
+                if (centerOnMyLocationOnce && !locationResolved) {
+                    delay(ENTRY_LOCATION_WAIT_MS)
+                }
+                val me = if (centerOnMyLocationOnce) myPosition else null
+                val target = me?.latLng ?: firstDroneLatLng ?: return@LaunchedEffect
+                map.animateCamera(
+                    CameraUpdateFactory.newLatLngZoom(target, if (me != null) 16f else 14f),
+                )
+                initialCentered = true
+                // 入口时已存在的无人机视为已完成定位，不再重复跟随；入口后新发现的仍会跟随
+                cameraMoved = firstDroneLatLng != null
             }
         }
     }

@@ -15,6 +15,8 @@ import kotlin.math.abs
  *  - [showOperator]   首页为 false（只显示飞机标记）；详情页为 true（飞机+遥控站）
  *  - [showMyLocation] 详情页 true，地图上显示本机位置
  *  - [showLabels]     标记旁显示飞机呼号（ID 后四位）
+ *  - [centerOnMyLocationOnce] 入口相机定位一次到本机位置（仅首页 true）；
+ *    false 时按默认行为定位到首架无人机（详情页/全屏页）
  */
 interface MapBackend {
     @Composable
@@ -24,6 +26,7 @@ interface MapBackend {
         showOperator: Boolean,
         showMyLocation: Boolean,
         showLabels: Boolean,
+        centerOnMyLocationOnce: Boolean,
         modifier: Modifier,
     )
 
@@ -56,6 +59,7 @@ fun DroneMap(
     showOperator: Boolean = false,
     showMyLocation: Boolean = false,
     showLabels: Boolean = true,
+    centerOnMyLocationOnce: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     MapBackendProvider.backend.Content(
@@ -64,6 +68,7 @@ fun DroneMap(
         showOperator = showOperator,
         showMyLocation = showMyLocation,
         showLabels = showLabels,
+        centerOnMyLocationOnce = centerOnMyLocationOnce,
         modifier = modifier,
     )
 }

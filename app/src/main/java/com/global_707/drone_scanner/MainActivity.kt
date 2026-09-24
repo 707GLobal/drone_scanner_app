@@ -21,12 +21,14 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import com.global_707.drone_scanner.data.AppLogger
 import com.global_707.drone_scanner.data.AppPrefs
 import com.global_707.drone_scanner.data.ScannerController
 import com.global_707.drone_scanner.ui.screens.AboutScreen
 import com.global_707.drone_scanner.ui.screens.DisplaySettingsScreen
 import com.global_707.drone_scanner.ui.screens.DroneDetailScreen
 import com.global_707.drone_scanner.ui.screens.FullscreenMapScreen
+import com.global_707.drone_scanner.ui.screens.LogSettingsScreen
 import com.global_707.drone_scanner.ui.screens.MapHomeScreen
 import com.global_707.drone_scanner.ui.screens.SearchSettingsScreen
 import com.global_707.drone_scanner.ui.screens.SettingsScreen
@@ -36,6 +38,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         AppPrefs.init(applicationContext)
+        // 日志模块：按用户设置决定是否自动开始记录（自动模式）
+        AppLogger.init(applicationContext, AppPrefs.logMode)
         enableEdgeToEdge()
         setContent {
             DroneScannerTheme {
@@ -53,6 +57,7 @@ private val routeOrder = listOf(
     "fullscreen",
     "settings/search",
     "settings/display",
+    "settings/log",
     "settings/about",
 )
 
@@ -149,6 +154,7 @@ private fun DroneScannerRoot() {
                     onBack = { navigateTo("map") },
                     onSearchSettings = { navigateTo("settings/search") },
                     onDisplaySettings = { navigateTo("settings/display") },
+                    onLogSettings = { navigateTo("settings/log") },
                     onAbout = { navigateTo("settings/about") },
                 )
             }
@@ -161,6 +167,11 @@ private fun DroneScannerRoot() {
             "settings/display" -> {
                 BackHandler { navigateTo("settings") }
                 DisplaySettingsScreen(onBack = { navigateTo("settings") })
+            }
+
+            "settings/log" -> {
+                BackHandler { navigateTo("settings") }
+                LogSettingsScreen(onBack = { navigateTo("settings") })
             }
 
             "settings/about" -> {

@@ -8,6 +8,10 @@
     <string name="scan_status_off">扫描已关闭</string>
     <string name="scan_status_error">扫描异常</string>
     <string name="scan_status_stopped">已停止</string>
+    <string name="scan_status_external_wait">等待外置设备</string>
+    <string name="scan_channel_external">外置天线</string>
+    <string name="scan_external_not_connected">未连接</string>
+    <string name="scan_external_hint">请连接外置天线设备（USB 或蓝牙）</string>
     <string name="reminder_title">系统蓝牙 / Wi-Fi 未开启</string>
     <string name="reminder_bt">系统蓝牙未开启，RID 扫描无法工作</string>
     <string name="reminder_wifi">系统 Wi-Fi 未开启，Wi-Fi 扫描无法工作</string>
@@ -80,20 +84,38 @@
     <string name="search_settings">搜索设置</string>
     <string name="display_settings">显示设置</string>
     <string name="about_us">关于我们</string>
-    <string name="app_version">v1.0.0</string>
+    <string name="app_version">v1.1.0</string>
 
     <!-- 搜索设置（全部中文） -->
+    <!-- 扫描模式：顶部滑块（手机直连 / 外置天线） -->
+    <string name="scan_source_title">扫描模式</string>
+    <string name="scan_source_internal">手机直连</string>
+    <string name="scan_source_external">外置天线</string>
+    <string name="scan_source_internal_desc">使用本机蓝牙与 Wi-Fi 直接接收附近无人机的 RID 广播</string>
+    <string name="scan_source_external_desc">射频扫描由外置天线设备负责，手机仅作显示端（相关选项后续版本开放）</string>
+
+    <!-- 外置天线（预留：后续接入 USB / 蓝牙链路时替换为真实控件） -->
+    <string name="scan_group_external">外置天线</string>
+    <string name="external_option_connect">连接方式</string>
+    <string name="external_option_connect_value">USB / 蓝牙（预留）</string>
+    <string name="external_option_status">设备状态</string>
     <string name="scan_group_bluetooth">蓝牙扫描</string>
     <string name="scan_group_wifi">Wi-Fi 扫描</string>
     <string name="scan_bluetooth">蓝牙</string>
     <string name="scan_wifi">Wi-Fi</string>
-    <string name="bt4_legacy_supported">支持蓝牙 4 传统广播（Legacy）</string>
-    <string name="bt4_legacy_desc">设备支持 Bluetooth 4 Legacy 技术，可用于检测无人机 Remote ID 信号</string>
-    <string name="bt5_extended_supported">支持蓝牙 5 扩展广播（Extended）</string>
-    <string name="bt5_extended_desc">设备支持蓝牙 5 扩展广播（长距/2M PHY），可检测更远距离的 Remote ID 信号</string>
-    <string name="wifi_nan_supported">支持 Wi-Fi NAN</string>
-    <string name="wifi_nan_not_supported">不支持 Wi-Fi NAN</string>
-    <string name="wifi_nan_desc">Wi-Fi Aware（NAN）是无人机 Remote ID 的 Wi-Fi 承载通道，不支持时仅可通过蓝牙检测</string>
+    <!-- 本机能力（标题统一为"本机是否支持…"；不支持时给出原因，并强制关闭对应扫描通道） -->
+    <string name="cap_bt4_title">本机支持蓝牙 4 传统广播（Legacy）</string>
+    <string name="cap_bt4_title_no">本机不支持蓝牙 4 传统广播（Legacy）</string>
+    <string name="cap_bt4_desc">蓝牙 RID 广播的基础承载，检测功能依赖该能力</string>
+    <string name="cap_bt4_reason">未检测到蓝牙适配器，蓝牙 RID 扫描不可用，已自动关闭</string>
+    <string name="cap_bt5_title">本机支持蓝牙 5 扩展广播（Extended）</string>
+    <string name="cap_bt5_title_no">本机不支持蓝牙 5 扩展广播（Extended）</string>
+    <string name="cap_bt5_desc">支持长距 / 2M PHY 扩展广播，可检测更远距离的 RID 信号</string>
+    <string name="cap_bt5_reason">无扩展广播能力，仅可用传统广播检测，不影响基本检测</string>
+    <string name="cap_wifi_title">本机支持 Wi-Fi 信标 RID 解析</string>
+    <string name="cap_wifi_title_no">本机不支持 Wi-Fi 信标 RID 解析</string>
+    <string name="cap_wifi_desc">RID 的 Wi-Fi 承载为信标厂商 IE，读取需 Android 11 及以上</string>
+    <string name="cap_wifi_reason">系统版本低于 Android 11 或本机无 Wi-Fi，Wi-Fi 扫描不可用，已自动关闭</string>
     <string name="scan_priority">扫描优先级</string>
     <string name="scan_priority_low">低</string>
     <string name="scan_priority_normal">中</string>
@@ -107,9 +129,44 @@
     <!-- 显示设置 -->
     <string name="keep_screen_on">阻止机器休眠</string>
 
+    <!-- 日志设置 -->
+    <string name="log_settings">日志设置</string>
+    <string name="log_mode_title">记录方式</string>
+    <string name="log_mode_auto">自动记录</string>
+    <string name="log_mode_manual">手动记录</string>
+    <string name="log_mode_off">关闭</string>
+    <string name="log_mode_auto_desc">App 启动即自动开始记录，进程存活期间持续写入；App 退出后停止并保存。若需退到后台仍持续记录，需要前台服务，本版本未实现。</string>
+    <string name="log_mode_manual_desc">由下方按钮控制开始与终止；离开本页面后仍会继续记录，直到点「终止记录」。</string>
+    <string name="log_mode_off_desc">不创建、不写入日志文件；已有日志文件保留，可在下方清理。</string>
+    <string name="log_manual_title">手动控制</string>
+    <string name="log_state_recording">记录中</string>
+    <string name="log_state_stopped">已停止</string>
+    <string name="log_btn_start">开始记录</string>
+    <string name="log_btn_stop">终止记录</string>
+    <string name="log_duration">已记录时长：%1$s</string>
+    <string name="log_current_file">当前文件：%1$s</string>
+    <string name="log_current_file_none">当前文件：—</string>
+    <string name="log_location_title">保存位置</string>
+    <string name="log_location_current">当前路径：%1$s</string>
+    <string name="log_location_pick">选择存储位置</string>
+    <string name="log_location_reset">恢复默认位置</string>
+    <string name="log_default_path">默认路径：%1$s</string>
+    <string name="log_location_pick_failed">该目录不可写入，已保持原保存位置</string>
+    <string name="log_files_title">日志文件</string>
+    <string name="log_total_size">日志总大小：%1$s</string>
+    <string name="log_view">查看日志</string>
+    <string name="log_clear">清理日志</string>
+    <string name="log_clear_confirm_title">清理日志</string>
+    <string name="log_clear_confirm_message">将删除当前保存位置下由本应用生成的 %1$d 个日志文件（%2$s），此操作不可恢复。</string>
+    <string name="log_clear_confirm_ok">清理</string>
+    <string name="log_clear_confirm_cancel">取消</string>
+    <string name="log_clear_done">已清理 %1$d 个日志文件</string>
+    <string name="log_clear_none">没有可清理的日志文件</string>
+    <string name="log_view_failed">未找到可打开日志文件夹的系统「文件」</string>
+
     <!-- 关于我们 -->
     <string name="about_static_note">无人机 RID 检测应用</string>
-    <string name="about_desc">通过蓝牙与 Wi-Fi 广播扫描附近无人机的 Remote ID（ASTM F3411）信号，解包并展示序列号、速度、气压/地理高度、时间戳等真实字段。检测数据全部来自真实 RID 信号解包。</string>
+    <string name="about_desc">通过接收附近无人机的 Remote ID（ASTM F3411 / ASD-STAN EN 4709-002 / GB 42590）广播，实时解包并在地图上展示序列号、速度、高度、航向、RID 时间戳与遥控站位置等字段。</string>
     <string name="demo_mode">演示模式</string>
     <string name="demo_mode_desc">无检测结果时显示示例数据（带"演示"标签），便于预览界面效果</string>
     <string name="github_repo">GitHub 仓库</string>
