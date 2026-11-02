@@ -99,14 +99,42 @@ Remote ID 广播（ASTM F3411 / ASD-STAN EN 4709-002），解包后在腾讯地�
 
 Windows 下请使用 `gradlew.bat`。
 
-腾讯地图 Key 配置：在用户级 `~/.gradle/gradle.properties` 中写入
+### 腾讯地图 Key
+
+在用户级 `~/.gradle/gradle.properties` 中写入（也可用环境变量 `TENCENT_MAP_KEY`）：
 
 ```properties
 tencentMapKey=<你的腾讯位置服务 Key>
 ```
 
-并在腾讯位置服务控制台将该 Key 绑定应用包名 `com.global_707.drone_scanner` 与签名 SHA1
-（更换签名后需重新绑定，否则地图空白）。
+并在腾讯位置服务控制台的 Key 设置里，把「授权应用」填成应用包名
+`com.global_707.drone_scanner`（每行一个，留空则不限制）。
+
+腾讯与高德的规则不同：**Key 只校验包名 / Bundle Identifier，不校验签名 SHA1**。
+所以换 keystore、重新签名都不需要改控制台，地图也不会失效；只有改了
+applicationId（包名）才需要回来改「授权应用」。
+
+未配置时 debug 包仍可构建（地图空白，构建时告警），release 包会被直接拒绝。
+
+### 发布签名
+
+仓库内不存放任何密钥文件。正式 keystore 放在仓库之外，四项凭据写在用户级
+`~/.gradle/gradle.properties`（或 CI 环境变量 `DRONE_RELEASE_*`）：
+
+```properties
+droneReleaseStoreFile=C:\\Users\\<用户名>\\.android\\keystores\\drone-scanner-release.jks
+droneReleaseStorePassword=<口令>
+droneReleaseKeyAlias=drone-scanner
+droneReleaseKeyPassword=<口令>
+```
+
+```bash
+./gradlew assembleRelease   # 输出 app-release.apk（正式证书签名）
+```
+
+缺任意一项时 `assembleDebug` 不受影响，而 `assembleRelease` / `bundleRelease`
+会在打包前失败并提示补齐配置，不会产出未签名或用 debug 证书签名的包。
+keystore 与口令请单独备份：丢失后无法再对已发布应用做覆盖升级，只能换包名重新上架。
 
 ## 开源许可
 
