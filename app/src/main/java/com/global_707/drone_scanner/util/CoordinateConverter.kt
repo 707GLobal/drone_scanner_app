@@ -32,6 +32,28 @@ object CoordinateConverter {
         return (lat + dLat) to (lng + dLng)
     }
 
+    /**
+     * GCJ-02 → WGS-84（迭代反解，收敛后误差 < 0.1 m）。
+     *
+     * **只用于"地图视口 → 数据源查询范围"这类反算**（例如把腾讯地图的 GCJ-02 视口
+     * 换成离线包 manifest 里 WGS-84 的 bbox），不要用它把数据画到地图上——
+     * 绘制方向永远是 [wgs84ToGcj02]。
+     *
+     * 境外坐标与 [wgs84ToGcj02] 对称：原样返回。
+     */
+    fun gcj02ToWgs84(lat: Double, lng: Double): Pair<Double, Double> {
+        if (outOfChina(lat, lng)) return lat to lng
+        var wgsLat = lat
+        var wgsLng = lng
+        // 正解是"加偏移"，反解即用残差逐次修正；4 次迭代足以收敛到亚米级
+        repeat(4) {
+            val (gcjLat, gcjLng) = wgs84ToGcj02(wgsLat, wgsLng)
+            wgsLat -= gcjLat - lat
+            wgsLng -= gcjLng - lng
+        }
+        return wgsLat to wgsLng
+    }
+
     private fun outOfChina(lat: Double, lng: Double): Boolean =
         lng < 72.004 || lng > 137.8347 || lat < 0.8293 || lat > 55.8271
 
