@@ -5,6 +5,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -41,22 +42,23 @@ data class LocateTarget(
 
 /**
  * 地图悬浮控件组（所有包含地图的页面共用）：
- *  - 图层切换（标准 / 卫星）
+ *  - 图层按钮：点击弹出图层菜单（底图单选 + 叠加图层开关 + 图例），
+ *    菜单用 Popup 独立窗口——不影响控件布局，点击外部/返回键自动关闭
  *  - 定位按钮：点击在右侧弹出 [locateTargets] 功能按钮（我的位置/无人机/遥控站），
- *    弹出菜单使用 Popup 独立窗口——不影响控件布局（上下按钮纹丝不动）、
- *    点击 Popup 外任意处自动关闭；展开时定位按钮变为 X
+ *    展开时定位按钮变为 X
  *  - 重置北向
  *
- * 页面差异仅通过 [locateTargets] 传入；展开动画依次错开弹出。
+ * 两个弹出菜单互斥：打开一个会自动收起另一个。
+ * 页面差异仅通过 [locateTargets] 与 [layers] 传入。
  */
 @Composable
 fun MapControls(
-    satellite: Boolean,
+    layers: LayerMenuModel,
     locateTargets: List<LocateTarget>,
-    onToggleSatellite: () -> Unit,
     onResetNorth: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var layersExpanded by remember { mutableStateOf(false) }
     var locateExpanded by remember { mutableStateOf(false) }
     val popupOffsetX = with(LocalDensity.current) { 52.dp.roundToPx() }
 
@@ -65,23 +67,45 @@ fun MapControls(
         verticalArrangement = Arrangement.spacedBy(8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        ControlButton(
-            icon = AppIcons.Layers,
-            contentDescription = if (satellite) {
-                stringResource(R.string.map_standard)
-            } else {
-                stringResource(R.string.map_satellite)
-            },
-            onClick = onToggleSatellite,
-        )
+        // 图层：弹出菜单（底图 + 叠加图层）
+        Box {
+            ControlButton(
+                icon = AppIcons.Layers,
+                contentDescription = stringResource(R.string.map_layers),
+                highlighted = layersExpanded || layers.rows.any { it.visible },
+                onClick = {
+                    locateExpanded = false
+                    layersExpanded = !layersExpanded
+                },
+            )
+            if (layersExpanded) {
+                Popup(
+                    alignment = Alignment.TopStart,
+                    offset = IntOffset(popupOffsetX, 0),
+                    onDismissRequest = { layersExpanded = false },
+                    properties = PopupProperties(
+                        focusable = true,
+                        dismissOnClickOutside = true,
+                        dismissOnBackPress = true,
+                    ),
+                ) {
+                    LayerMenuPanel(
+                        model = layers,
+                        onDismiss = { layersExpanded = false },
+                    )
+                }
+            }
+        }
 
         // 定位按钮：展开时变为 X
         Box {
             ControlButton(
                 icon = if (locateExpanded) AppIcons.Close else AppIcons.MyLocation,
                 contentDescription = stringResource(R.string.map_locate_me),
+                highlighted = locateExpanded,
                 onClick = {
                     if (locateTargets.isNotEmpty()) {
+                        layersExpanded = false
                         locateExpanded = !locateExpanded
                     }
                 },
@@ -132,12 +156,13 @@ fun MapControls(
     }
 }
 
-/** 圆形悬浮小按钮（MaterialIcon + 系统 Ripple） */
+/** 圆形悬浮小按钮（MaterialIcon + 系统 Ripple）；[highlighted] 时加一圈主色描边 */
 @Composable
 private fun ControlButton(
     icon: ImageVector,
     contentDescription: String,
     onClick: () -> Unit,
+    highlighted: Boolean = false,
 ) {
     val colors = LocalDroneColors.current
     Box(
@@ -145,13 +170,20 @@ private fun ControlButton(
             .size(44.dp)
             .clip(CircleShape)
             .background(colors.card.copy(alpha = 0.9f))
+            .then(
+                if (highlighted) {
+                    Modifier.border(1.5.dp, colors.primary.copy(alpha = 0.8f), CircleShape)
+                } else {
+                    Modifier
+                },
+            )
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
             imageVector = icon,
             contentDescription = contentDescription,
-            tint = colors.primary,
+            tint = if (highlighted) colors.primary else colors.primary.copy(alpha = 0.9f),
             modifier = Modifier.size(20.dp),
         )
     }

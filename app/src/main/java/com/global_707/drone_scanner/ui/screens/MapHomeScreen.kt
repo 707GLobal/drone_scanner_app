@@ -85,6 +85,7 @@ import com.global_707.drone_scanner.ui.map.DroneMap
 import com.global_707.drone_scanner.ui.map.LocateTarget
 import com.global_707.drone_scanner.ui.map.MapBackendProvider
 import com.global_707.drone_scanner.ui.map.MapControls
+import com.global_707.drone_scanner.ui.map.rememberLayerMenu
 import com.global_707.drone_scanner.ui.theme.AppIcons
 import com.global_707.drone_scanner.ui.theme.DroneTypography
 import com.global_707.drone_scanner.ui.theme.LocalDroneColors
@@ -110,6 +111,8 @@ fun MapHomeScreen(
     val colors = LocalDroneColors.current
     val context = LocalContext.current
     val appContext = context.applicationContext
+    // 图层菜单（底图单选 + 叠加图层开关）：三处地图页共用同一份组装逻辑
+    val layerMenu = rememberLayerMenu(context)
     var scanPanelVisible by remember { mutableStateOf(false) }
     var permissionsGranted by remember { mutableStateOf(checkAllPermissions(context)) }
     val pendingFeatureHint = stringResource(R.string.map_feature_pending)
@@ -183,6 +186,7 @@ fun MapHomeScreen(
         DroneMap(
             drones = ScannerController.drones,
             satellite = AppPrefs.satelliteMap,
+            airspaceLayers = AppPrefs.airspaceVisible,
             showOperator = false,
             showMyLocation = true,
             showLabels = true,
@@ -233,7 +237,7 @@ fun MapHomeScreen(
             )
         }
         MapControls(
-            satellite = AppPrefs.satelliteMap,
+            layers = layerMenu,
             locateTargets = listOfNotNull(
                 // 定位到设备位置
                 LocateTarget(
@@ -258,7 +262,6 @@ fun MapHomeScreen(
                         )
                     },
             ),
-            onToggleSatellite = { AppPrefs.saveSatelliteMap(!AppPrefs.satelliteMap) },
             onResetNorth = {
                 if (!MapBackendProvider.backend.resetNorth(context)) {
                     android.widget.Toast.makeText(context, pendingFeatureHint, android.widget.Toast.LENGTH_SHORT).show()

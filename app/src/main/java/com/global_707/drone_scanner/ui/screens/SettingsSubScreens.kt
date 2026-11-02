@@ -27,6 +27,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
@@ -39,12 +40,14 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -64,9 +67,17 @@ import com.global_707.drone_scanner.ui.components.RadarGlyph
 import com.global_707.drone_scanner.ui.components.SectionCard
 import com.global_707.drone_scanner.ui.theme.AppIcons
 import com.global_707.drone_scanner.ui.theme.DroneTypography
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import com.global_707.drone_scanner.data.airspace.AirspaceLayers
+import com.global_707.drone_scanner.data.airspace.AirspaceRepository
+import com.global_707.drone_scanner.data.airspace.AirspaceSourceKind
+import com.global_707.drone_scanner.data.airspace.AirspaceState
 import com.global_707.drone_scanner.ui.theme.LocalDroneColors
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 
 // ============ 搜索设置（蓝牙 / Wi-Fi 分组 + 实时能力状态 + 扫描优先级） ============
 
@@ -541,7 +552,174 @@ fun DisplaySettingsScreen(onBack: () -> Unit) {
                     )
                 }
             }
+
+            Spacer(Modifier.height(24.dp))
+
+            // ---- 适飞空域数据（本地离线包：导入 / 更换 / 移除） ----
+            GroupTitle(title = stringResource(R.string.airspace_data_title))
+            Spacer(Modifier.height(12.dp))
+            AirspaceDataCard()
         }
+    }
+}
+
+/**
+ * 适飞空域离线数据管理卡片。
+ *
+ * 数据只保存在本机（`filesDir/airspace/`），导入后可在地图「图层」菜单里单独开关；
+ * 这里也是"导入数据包"的第二入口（第一入口在图层菜单里）。
+ */
+@Composable
+private fun AirspaceDataCard() {
+    val colors = LocalDroneColors.current
+    val context = LocalContext.current
+    val appContext = context.applicationContext
+    val scope = rememberCoroutineScope()
+    var importing by remember { mutableStateOf(false) }
+    var confirmRemove by remember { mutableStateOf(false) }
+
+    val importer = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            importing = true
+            val result = AirspaceRepository.importAndRefresh(appContext, uri)
+            importing = false
+            result.fold(
+                onSuccess = { manifest ->
+                    Toast.makeText(
+                        appContext,
+                        appContext.getString(R.string.airspace_import_success, manifest.version),
+                        Toast.LENGTH_LONG,
+                    ).show()
+                },
+                onFailure = { error ->
+                    Toast.makeText(
+                        appContext,
+                        appContext.getString(
+                            R.string.airspace_import_failed,
+                            error.message ?: appContext.getString(R.string.airspace_import_failed_unknown),
+                        ),
+                        Toast.LENGTH_LONG,
+                    ).show()
+                },
+            )
+        }
+    }
+
+    LaunchedEffect(Unit) { AirspaceRepository.refresh(appContext) }
+
+    val catalog = AirspaceState.catalogOf(AirspaceLayers.SUITABLE)
+    val sourceLabel = when (catalog?.source) {
+        AirspaceSourceKind.BUNDLED -> stringResource(R.string.airspace_source_bundled)
+        AirspaceSourceKind.IMPORTED -> stringResource(R.string.airspace_source_imported)
+        null -> null
+    }
+
+    SectionCard {
+        Text(
+            text = stringResource(R.string.airspace_data_desc),
+            style = DroneTypography.label,
+            color = colors.mutedForeground,
+        )
+        Spacer(Modifier.height(10.dp))
+        Text(
+            text = when {
+                importing -> stringResource(R.string.airspace_status_importing)
+                catalog == null -> stringResource(R.string.airspace_data_none)
+                else -> stringResource(
+                    R.string.airspace_data_version,
+                    catalog.version,
+                    sourceLabel.orEmpty(),
+                    catalog.zooms.first,
+                    catalog.zooms.last,
+                )
+            },
+            style = DroneTypography.captionMedium,
+            color = if (catalog == null) colors.mutedForeground else colors.foreground,
+        )
+        catalog?.attribution?.let { attribution ->
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = stringResource(R.string.airspace_data_attribution, attribution),
+                style = DroneTypography.micro,
+                color = colors.mutedForeground,
+            )
+        }
+
+        Spacer(Modifier.height(14.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            AirspaceDataButton(
+                label = stringResource(
+                    if (catalog == null) R.string.airspace_data_import else R.string.airspace_data_replace,
+                ),
+                onClick = { importer.launch(arrayOf("*/*")) },
+            )
+            if (catalog?.source == AirspaceSourceKind.IMPORTED) {
+                AirspaceDataButton(
+                    label = stringResource(R.string.airspace_data_remove),
+                    danger = true,
+                    onClick = { confirmRemove = true },
+                )
+            }
+        }
+    }
+
+    if (confirmRemove) {
+        AlertDialog(
+            onDismissRequest = { confirmRemove = false },
+            title = { Text(stringResource(R.string.airspace_data_remove_confirm_title)) },
+            text = { Text(stringResource(R.string.airspace_data_remove_confirm_message)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmRemove = false
+                        scope.launch {
+                            AirspaceRepository.removeAndRefresh(appContext)
+                            Toast.makeText(
+                                appContext,
+                                appContext.getString(R.string.airspace_data_remove_ok),
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                        }
+                    },
+                ) {
+                    Text(stringResource(R.string.airspace_data_remove))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmRemove = false }) {
+                    Text(stringResource(R.string.airspace_data_remove_cancel))
+                }
+            },
+        )
+    }
+}
+
+/** 空域数据卡片的小按钮 */
+@Composable
+private fun AirspaceDataButton(label: String, danger: Boolean = false, onClick: () -> Unit) {
+    val colors = LocalDroneColors.current
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(
+                if (danger) {
+                    colors.danger.copy(alpha = 0.12f)
+                } else {
+                    colors.primary.copy(alpha = 0.12f)
+                },
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            style = DroneTypography.label,
+            color = if (danger) colors.danger else colors.primary,
+        )
     }
 }
 

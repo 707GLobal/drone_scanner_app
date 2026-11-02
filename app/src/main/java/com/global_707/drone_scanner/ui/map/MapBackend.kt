@@ -15,6 +15,8 @@ import kotlin.math.abs
  *  - [showOperator]   首页为 false（只显示飞机标记）；详情页为 true（飞机+遥控站）
  *  - [showMyLocation] 详情页 true，地图上显示本机位置
  *  - [showLabels]     标记旁显示飞机呼号（ID 后四位）
+ *  - [airspaceLayers] 需要显示的叠加图层 id 集合（例如 "suitable"）；
+ *    实际渲染与坐标系对齐由后端负责（腾讯实现见 TencentAirspaceLayer）
  *  - [centerOnMyLocationOnce] 入口相机定位一次到本机位置（仅首页 true）；
  *    false 时按默认行为定位到首架无人机（详情页/全屏页）
  */
@@ -23,6 +25,7 @@ interface MapBackend {
     fun Content(
         drones: List<Drone>,
         satellite: Boolean,
+        airspaceLayers: Set<String>,
         showOperator: Boolean,
         showMyLocation: Boolean,
         showLabels: Boolean,
@@ -56,6 +59,7 @@ object MapBackendProvider {
 fun DroneMap(
     drones: List<Drone>,
     satellite: Boolean,
+    airspaceLayers: Set<String> = emptySet(),
     showOperator: Boolean = false,
     showMyLocation: Boolean = false,
     showLabels: Boolean = true,
@@ -65,6 +69,7 @@ fun DroneMap(
     MapBackendProvider.backend.Content(
         drones = drones,
         satellite = satellite,
+        airspaceLayers = airspaceLayers,
         showOperator = showOperator,
         showMyLocation = showMyLocation,
         showLabels = showLabels,

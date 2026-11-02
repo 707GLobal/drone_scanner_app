@@ -49,6 +49,7 @@ import com.global_707.drone_scanner.ui.map.DroneMap
 import com.global_707.drone_scanner.ui.map.LocateTarget
 import com.global_707.drone_scanner.ui.map.MapBackendProvider
 import com.global_707.drone_scanner.ui.map.MapControls
+import com.global_707.drone_scanner.ui.map.rememberLayerMenu
 import com.global_707.drone_scanner.ui.theme.AppIcons
 import com.global_707.drone_scanner.ui.theme.DroneTypography
 import com.global_707.drone_scanner.ui.theme.LocalDroneColors
@@ -100,6 +101,7 @@ fun DroneDetailScreen(
 ) {
     val colors = LocalDroneColors.current
     val context = LocalContext.current
+    val layerMenu = rememberLayerMenu(context)
     val pendingFeatureHint = stringResource(R.string.map_feature_pending)
     val operatorLabel = stringResource(R.string.operator_label)
     val locateDevice = stringResource(R.string.locate_to_device)
@@ -123,6 +125,7 @@ fun DroneDetailScreen(
             DroneMap(
                 drones = listOf(drone),
                 satellite = AppPrefs.satelliteMap,
+                airspaceLayers = AppPrefs.airspaceVisible,
                 showOperator = true,
                 showMyLocation = true,
                 showLabels = true,
@@ -131,7 +134,7 @@ fun DroneDetailScreen(
 
             // 地图悬浮控件（左上角）：定位按钮弹出菜单（设备/无人机/遥控站，图标按钮 + 动画）
             MapControls(
-                satellite = AppPrefs.satelliteMap,
+                layers = layerMenu,
                 locateTargets = listOfNotNull(
                     LocateTarget(
                         icon = AppIcons.Phone,
@@ -161,7 +164,6 @@ fun DroneDetailScreen(
                         }
                     },
                 ),
-                onToggleSatellite = { AppPrefs.saveSatelliteMap(!AppPrefs.satelliteMap) },
                 onResetNorth = {
                     if (!MapBackendProvider.backend.resetNorth(context)) {
                         Toast.makeText(context, pendingFeatureHint, Toast.LENGTH_SHORT).show()
@@ -401,6 +403,7 @@ fun FullscreenMapScreen(
 ) {
     val colors = LocalDroneColors.current
     val context = LocalContext.current
+    val layerMenu = rememberLayerMenu(context)
     val pendingFeatureHint = stringResource(R.string.map_feature_pending)
     val locateDevice = stringResource(R.string.locate_to_device)
     val locateDrone = stringResource(R.string.locate_to_drone)
@@ -436,13 +439,14 @@ fun FullscreenMapScreen(
             DroneMap(
                 drones = listOf(drone),
                 satellite = AppPrefs.satelliteMap,
+                airspaceLayers = AppPrefs.airspaceVisible,
                 showOperator = true,
                 showMyLocation = true,
                 showLabels = true,
                 modifier = Modifier.fillMaxSize(),
             )
             MapControls(
-                satellite = AppPrefs.satelliteMap,
+                layers = layerMenu,
                 locateTargets = listOfNotNull(
                     LocateTarget(
                         icon = AppIcons.Phone,
@@ -472,7 +476,6 @@ fun FullscreenMapScreen(
                         }
                     },
                 ),
-                onToggleSatellite = { AppPrefs.saveSatelliteMap(!AppPrefs.satelliteMap) },
                 onResetNorth = {
                     if (!MapBackendProvider.backend.resetNorth(context)) {
                         Toast.makeText(context, pendingFeatureHint, Toast.LENGTH_SHORT).show()

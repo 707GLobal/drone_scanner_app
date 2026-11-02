@@ -51,6 +51,41 @@
     <string name="map_standard">标准地图</string>
     <string name="map_satellite">卫星地图</string>
 
+    <!-- 图层菜单（底图单选 + 叠加图层开关） -->
+    <string name="map_layers">图层</string>
+    <string name="map_layer_group_base">底图</string>
+    <string name="map_layer_group_overlay">叠加图层</string>
+    <string name="map_layer_legend">图例</string>
+    <string name="airspace_layer_suitable">适飞空域</string>
+    <string name="airspace_layer_other">其他图层</string>
+    <string name="airspace_status_missing">未安装数据</string>
+    <string name="airspace_status_importing">正在导入…</string>
+    <string name="airspace_status_ready">数据 %1$s · %2$s</string>
+    <string name="airspace_status_zoom_out">当前缩放不显示（%1$d–%2$d 级）</string>
+    <string name="airspace_status_error">数据损坏，请重新导入</string>
+    <string name="airspace_detail_zooms">z%1$d–%2$d</string>
+    <string name="airspace_action_import">导入</string>
+    <string name="airspace_action_retry">重试</string>
+    <string name="airspace_source_bundled">内置</string>
+    <string name="airspace_source_imported">导入</string>
+    <string name="airspace_import_success">数据包已导入：%1$s</string>
+    <string name="airspace_import_failed">导入失败：%1$s</string>
+    <string name="airspace_import_failed_unknown">未知错误</string>
+
+    <!-- 显示设置：适飞空域数据（离线包） -->
+    <string name="airspace_data_title">适飞空域数据</string>
+    <string name="airspace_data_desc">离线数据包保存在本机、不联网；导入后可在「图层」菜单中单独开关显示。</string>
+    <string name="airspace_data_none">未安装数据包</string>
+    <string name="airspace_data_version">版本 %1$s · %2$s · z%3$d–%4$d</string>
+    <string name="airspace_data_import">导入数据包</string>
+    <string name="airspace_data_replace">更换数据包</string>
+    <string name="airspace_data_remove">移除</string>
+    <string name="airspace_data_remove_confirm_title">移除适飞空域数据</string>
+    <string name="airspace_data_remove_confirm_message">将删除已导入的离线数据包，地图上的适飞空域图层将不再显示。此操作不可恢复。</string>
+    <string name="airspace_data_remove_ok">已移除离线数据</string>
+    <string name="airspace_data_remove_cancel">取消</string>
+    <string name="airspace_data_attribution">数据说明：%1$s</string>
+
     <!-- 详情页 -->
     <string name="back">返回</string>
     <string name="nav_to_drone">导航到飞机</string>

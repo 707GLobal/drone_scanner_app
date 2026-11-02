@@ -28,6 +28,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.global_707.drone_scanner.data.Drone
+import com.global_707.drone_scanner.data.airspace.AirspaceState
 import com.global_707.drone_scanner.util.CoordinateConverter
 import com.global_707.drone_scanner.util.NavigationLauncher
 import com.tencent.tencentmap.mapsdk.maps.CameraUpdateFactory
@@ -37,6 +38,7 @@ import com.tencent.tencentmap.mapsdk.maps.model.BitmapDescriptorFactory
 import com.tencent.tencentmap.mapsdk.maps.model.CameraPosition
 import com.tencent.tencentmap.mapsdk.maps.model.LatLng
 import com.tencent.tencentmap.mapsdk.maps.model.LatLngBounds
+import com.tencent.tencentmap.mapsdk.maps.model.Marker
 import com.tencent.tencentmap.mapsdk.maps.model.MarkerOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -117,6 +119,7 @@ object TencentMapBackend : MapBackend {
     override fun Content(
         drones: List<Drone>,
         satellite: Boolean,
+        airspaceLayers: Set<String>,
         showOperator: Boolean,
         showMyLocation: Boolean,
         showLabels: Boolean,
@@ -136,6 +139,15 @@ object TencentMapBackend : MapBackend {
         var lastDrawn by remember { mutableStateOf<DrawSignature?>(null) }
         // 我的位置（主动定位，异步获取后刷新标记；含指南针朝向）
         var myPosition by remember { mutableStateOf<MyPosition?>(null) }
+
+        // 已添加的标记：重画时逐个移除（不再调用 map.clear()，否则会把空域叠加层一起清掉）
+        val markers = remember { mutableListOf<Marker>() }
+
+        // 空域叠加层：瓦片挂载与相机监听都在这里，绝不触碰标记的生命周期
+        val airspaceLayer = remember { TencentAirspaceLayer(context) }
+        DisposableEffect(Unit) {
+            onDispose { airspaceLayer.release() }
+        }
 
         // 需要显示我的位置时主动请求定位（lastKnown 优先，失败则单次请求）
         LaunchedEffect(showMyLocation) {
@@ -253,6 +265,9 @@ object TencentMapBackend : MapBackend {
                     )
                     if (signature == lastDrawn) return@update
                     lastDrawn = signature
+                    // 只移除本函数添加的标记：空域瓦片层/多边形由 TencentAirspaceLayer 管理
+                    markers.forEach { runCatching { it.remove() } }
+                    markers.clear()
                     applyMap(
                         map = map,
                         context = context,
@@ -261,6 +276,7 @@ object TencentMapBackend : MapBackend {
                         showOperator = showOperator,
                         myPosition = if (showMyLocation) myPosition else null,
                         showLabels = showLabels,
+                        markers = markers,
                     ) { first ->
                         firstDroneLatLng = first
                         // 入口相机决策完成后再跟随"新出现"的无人机，避免与入口定位抢占相机；
@@ -283,6 +299,14 @@ object TencentMapBackend : MapBackend {
                         delay(100)
                     }
                 }
+            }
+
+            // 空域叠加层：地图就绪 / 开关变化 / 数据包版本变化时同步覆盖物。
+            // 只增删空域自己的 TileOverlay，不触碰无人机标记。
+            LaunchedEffect(mapReady, airspaceLayers, satellite, AirspaceState.catalogs) {
+                val map = mapView.getMap() ?: return@LaunchedEffect
+                airspaceLayer.attach(map)
+                airspaceLayer.sync(airspaceLayers, AirspaceState.catalogs, satellite)
             }
 
             // 入口相机定位（只决策一次）：
@@ -316,6 +340,7 @@ object TencentMapBackend : MapBackend {
         showOperator: Boolean,
         myPosition: MyPosition?,
         showLabels: Boolean,
+        markers: MutableList<Marker>,
         onFirstDrone: (LatLng) -> Unit,
     ) {
         map.mapType = if (satellite) {
@@ -323,7 +348,8 @@ object TencentMapBackend : MapBackend {
         } else {
             TencentMap.MAP_TYPE_NORMAL
         }
-        map.clear()
+        // 不调用 map.clear()：调用方已逐个移除上一次的标记，
+        // 这样空域叠加层（TileOverlay / Polygon）不会随无人机刷新被清掉。
 
         // 无人机标记：调色板色圆底 + 飞机符号 + 呼号标签（WGS-84 → GCJ-02）
         var firstDrone: LatLng? = null
@@ -332,7 +358,7 @@ object TencentMapBackend : MapBackend {
             val lng = drone.droneLng ?: return@forEach
             val mapPos = toMapLatLng(lat, lng)
             if (firstDrone == null) firstDrone = mapPos
-            map.addMarker(
+            markers += map.addMarker(
                 MarkerOptions()
                     .position(mapPos)
                     .anchor(0.5f, markerAnchorY(context, drone.name, showLabels))
@@ -351,7 +377,7 @@ object TencentMapBackend : MapBackend {
             drones.forEach { drone ->
                 val lat = drone.operatorLat ?: return@forEach
                 val lng = drone.operatorLng ?: return@forEach
-                map.addMarker(
+                markers += map.addMarker(
                     MarkerOptions()
                         .position(toMapLatLng(lat, lng))
                         .anchor(0.5f, 0.5f)
@@ -367,7 +393,7 @@ object TencentMapBackend : MapBackend {
 
         // 我的位置：Google Maps 风格定位点 + 指南针朝向（详情页）
         if (myPosition != null) {
-            map.addMarker(
+            markers += map.addMarker(
                 MarkerOptions()
                     .position(myPosition.latLng)
                     .anchor(0.5f, 0.5f)

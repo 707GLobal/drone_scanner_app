@@ -56,6 +56,9 @@ object AppPrefs {
     var keepScreenOn by mutableStateOf(false)
     var demoMode by mutableStateOf(false)
 
+    /** 需要显示的叠加图层 id 集合（当前只有 "suitable" 适飞空域；后续空域按同一模式追加） */
+    var airspaceVisible by mutableStateOf<Set<String>>(emptySet())
+
     fun init(context: Context) {
         if (prefs == null) {
             prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -68,6 +71,8 @@ object AppPrefs {
             satelliteMap = prefs?.getBoolean("satellite_map", false) ?: false
             keepScreenOn = prefs?.getBoolean("keep_screen_on", false) ?: false
             demoMode = prefs?.getBoolean("demo_mode", false) ?: false
+            // getStringSet 返回的集合可能与内部实例共享，必须复制一份再持有
+            airspaceVisible = prefs?.getStringSet("airspace_visible", emptySet())?.toSet() ?: emptySet()
         }
     }
 
@@ -114,5 +119,11 @@ object AppPrefs {
     fun saveDemoMode(value: Boolean) {
         demoMode = value
         prefs?.edit()?.putBoolean("demo_mode", value)?.apply()
+    }
+
+    /** 开启/关闭某个叠加图层（例如适飞空域），持久化为字符串集合 */
+    fun saveAirspaceVisible(layerId: String, visible: Boolean) {
+        airspaceVisible = if (visible) airspaceVisible + layerId else airspaceVisible - layerId
+        prefs?.edit()?.putStringSet("airspace_visible", airspaceVisible)?.apply()
     }
 }
