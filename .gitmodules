@@ -1,0 +1,3 @@
+[submodule "tools/uom_map_capture"]
+	path = tools/uom_map_capture
+	url = https://github.com/707GLobal/uom_map_capture.git
