@@ -98,10 +98,11 @@ fun DroneDetailScreen(
     drone: Drone,
     onBack: () -> Unit,
     onEnterFullscreen: () -> Unit,
+    onOpenLayerSettings: () -> Unit,
 ) {
     val colors = LocalDroneColors.current
     val context = LocalContext.current
-    val layerMenu = rememberLayerMenu(context)
+    val layerMenu = rememberLayerMenu(context, onOpenLayerSettings)
     val pendingFeatureHint = stringResource(R.string.map_feature_pending)
     val operatorLabel = stringResource(R.string.operator_label)
     val locateDevice = stringResource(R.string.locate_to_device)
@@ -400,10 +401,11 @@ private fun altitudeValue(v: Float?): String = v?.let { "${formatNumber(it)} m" 
 fun FullscreenMapScreen(
     drone: Drone,
     onBack: () -> Unit,
+    onOpenLayerSettings: () -> Unit,
 ) {
     val colors = LocalDroneColors.current
     val context = LocalContext.current
-    val layerMenu = rememberLayerMenu(context)
+    val layerMenu = rememberLayerMenu(context, onOpenLayerSettings)
     val pendingFeatureHint = stringResource(R.string.map_feature_pending)
     val locateDevice = stringResource(R.string.locate_to_device)
     val locateDrone = stringResource(R.string.locate_to_drone)

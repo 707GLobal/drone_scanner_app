@@ -33,6 +33,8 @@ data class ManifestLayer(
 )
 
 data class AirspaceManifest(
+    /** 数据包显示名（例如「武汉离线包-1102」）；缺省时用 [version] 兜底 */
+    val name: String?,
     val schema: Int,
     val version: String,
     val generatedAtMillis: Long?,
@@ -43,6 +45,9 @@ data class AirspaceManifest(
     val bbox: GeoRect?,
     val layers: List<ManifestLayer>,
 ) {
+    /** 展示用包名：优先 manifest.name，其次 version */
+    val displayName: String get() = name?.takeIf { it.isNotBlank() } ?: version
+
     fun layer(id: String): ManifestLayer? = layers.firstOrNull { it.id == id }
 
     companion object {
@@ -101,6 +106,7 @@ data class AirspaceManifest(
             val bbox = obj.geoRect("bbox")
 
             return AirspaceManifest(
+                name = obj.optString("name")?.trim()?.takeIf { it.isNotBlank() },
                 schema = schema,
                 version = version,
                 generatedAtMillis = obj.long("generatedAt"),

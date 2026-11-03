@@ -106,13 +106,14 @@ import kotlin.math.roundToInt
 fun MapHomeScreen(
     onOpenSettings: () -> Unit,
     onOpenSearchSettings: () -> Unit,
+    onOpenLayerSettings: () -> Unit,
     onDroneClick: (Drone) -> Unit,
 ) {
     val colors = LocalDroneColors.current
     val context = LocalContext.current
     val appContext = context.applicationContext
     // 图层菜单（底图单选 + 叠加图层开关）：三处地图页共用同一份组装逻辑
-    val layerMenu = rememberLayerMenu(context)
+    val layerMenu = rememberLayerMenu(context, onOpenLayerSettings)
     var scanPanelVisible by remember { mutableStateOf(false) }
     var permissionsGranted by remember { mutableStateOf(checkAllPermissions(context)) }
     val pendingFeatureHint = stringResource(R.string.map_feature_pending)
@@ -847,6 +848,6 @@ internal fun formatNumber(value: Float): String =
 @Composable
 private fun MapHomeScreenPreview() {
     com.global_707.drone_scanner.ui.theme.DroneScannerTheme {
-        MapHomeScreen(onOpenSettings = {}, onOpenSearchSettings = {}, onDroneClick = {})
+        MapHomeScreen(onOpenSettings = {}, onOpenSearchSettings = {}, onOpenLayerSettings = {}, onDroneClick = {})
     }
 }

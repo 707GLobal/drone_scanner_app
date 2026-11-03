@@ -3,14 +3,13 @@ package com.global_707.drone_scanner.data.airspace
 import android.content.Context
 
 /**
- * 本地离线包数据源（当前唯一实现）。
+ * 本地离线包数据源：某个图层 + 某个数据包。
  *
- * 读取路径由 [AirspacePack] 决定：用户导入的包读 `filesDir/airspace/`，内置包读 `assets/airspace/`。
- * 全程无网络、无鉴权。
+ * 读取路径由 [PackStore] 决定（`filesDir/airspace/packs/<packId>/`），全程无网络、无鉴权。
  */
 class LocalPackSource(
     private val context: Context,
-    private val installed: AirspacePack.Installed,
+    private val pack: PackStore.Pack,
     private val catalog: AirspaceCatalog,
 ) : AirspaceSource {
 
@@ -19,5 +18,5 @@ class LocalPackSource(
     override fun catalog(): AirspaceCatalog = catalog
 
     override fun tile(z: Int, x: Int, y: Int): ByteArray? =
-        AirspacePack.openTile(context, installed, catalog.dir, z, x, y)
+        PackStore.tileBytes(context, pack, catalog.dir, z, x, y)
 }

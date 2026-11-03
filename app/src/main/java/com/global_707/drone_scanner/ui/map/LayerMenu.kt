@@ -5,6 +5,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Switch
@@ -37,33 +39,37 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.global_707.drone_scanner.R
 import com.global_707.drone_scanner.data.AppPrefs
-import com.global_707.drone_scanner.data.airspace.AirspaceLayerStatus
 import com.global_707.drone_scanner.data.airspace.AirspaceLayers
 import com.global_707.drone_scanner.data.airspace.AirspaceRepository
-import com.global_707.drone_scanner.data.airspace.AirspaceSourceKind
 import com.global_707.drone_scanner.data.airspace.AirspaceState
 import com.global_707.drone_scanner.ui.theme.AppIcons
 import com.global_707.drone_scanner.ui.theme.DroneTypography
 import com.global_707.drone_scanner.ui.theme.LocalDroneColors
 import kotlinx.coroutines.launch
 
-/** 叠加层菜单行（已把状态、版本、动作解析成文案） */
+/**
+ * 叠加图层菜单行。
+ *
+ * 设计规范（所有图层通用）：
+ *  - 行首色块 = 图例（颜色取图层注册表 style.strokeColor，不再单独列图例区）；
+ *  - 副标题只显示**当前选中的数据包名称**（演示数据时显示「演示数据」+ 演示徽标）；
+ *  - 右侧 = 开关（有数据时）或动作按钮（导入）。
+ */
 data class LayerMenuOverlayRow(
     val id: String,
     val title: String,
-    val status: String,
-    val detail: String?,
+    val subtitle: String,
+    val swatch: Color,
+    val demo: Boolean,
     val visible: Boolean,
-    val enabled: Boolean,
-    /** 需要一个动作按钮（如"导入"/"重试"）时非空；此时不显示开关 */
+    val hasData: Boolean,
     val actionLabel: String?,
 )
 
-/** 图层菜单的完整模型（底图单选 + 叠加层多选），由 [rememberLayerMenu] 组装 */
+/** 图层菜单完整模型（底图单选 + 叠加层多选 + 图层设置入口） */
 data class LayerMenuModel(
     val satellite: Boolean,
     val standardLabel: String,
@@ -71,22 +77,21 @@ data class LayerMenuModel(
     val baseGroupLabel: String,
     val overlayGroupLabel: String,
     val rows: List<LayerMenuOverlayRow>,
-    val legendLabel: String?,
-    val legendColor: Color?,
+    val settingsLabel: String,
     val onSelectBaseMap: (Boolean) -> Unit,
     val onToggleOverlay: (String) -> Unit,
     val onOverlayAction: (String) -> Unit,
+    val onOpenLayerSettings: () -> Unit,
 )
 
 /**
  * 组装图层菜单模型（三处地图页共用）。
  *
- * 同时负责：
- *  - 进入页面时刷新一次安装态（读本地 manifest，不联网）；
- *  - 提供"导入离线包"的文件选择器（未安装数据时，点开关或动作按钮都会拉起它）。
+ * 同时负责：进入页面/演示模式变化时刷新一次安装态（纯本地，不联网）；
+ * 未安装数据时提供"导入离线包"的文件选择器。
  */
 @Composable
-fun rememberLayerMenu(context: Context): LayerMenuModel {
+fun rememberLayerMenu(context: Context, onOpenLayerSettings: () -> Unit): LayerMenuModel {
     val appContext = context.applicationContext
     val scope = rememberCoroutineScope()
     var importing by remember { mutableStateOf(false) }
@@ -100,10 +105,10 @@ fun rememberLayerMenu(context: Context): LayerMenuModel {
             val result = AirspaceRepository.importAndRefresh(appContext, uri)
             importing = false
             result.fold(
-                onSuccess = { manifest ->
+                onSuccess = { pack ->
                     Toast.makeText(
                         appContext,
-                        appContext.getString(R.string.airspace_import_success, manifest.version),
+                        appContext.getString(R.string.airspace_import_success, pack.name),
                         Toast.LENGTH_LONG,
                     ).show()
                 },
@@ -121,68 +126,44 @@ fun rememberLayerMenu(context: Context): LayerMenuModel {
         }
     }
 
-    LaunchedEffect(Unit) { AirspaceRepository.refresh(appContext) }
-
-    val satellite = AppPrefs.satelliteMap
-    val visibleLayers = AppPrefs.airspaceVisible
+    // 演示模式开关会改变"是否注入演示空域"，需重新解析数据源
+    LaunchedEffect(AppPrefs.demoMode) { AirspaceRepository.refresh(appContext) }
 
     val rows = AirspaceLayers.all.map { spec ->
         val catalog = AirspaceState.catalogOf(spec.id)
-        val status = AirspaceState.statusOf(spec.id)
-        val installed = catalog != null
-        val visible = spec.id in visibleLayers
-        val sourceLabel = when (catalog?.source) {
-            AirspaceSourceKind.BUNDLED -> stringResource(R.string.airspace_source_bundled)
-            AirspaceSourceKind.IMPORTED -> stringResource(R.string.airspace_source_imported)
-            null -> ""
-        }
-        val statusText = when {
+        val visible = spec.id in AppPrefs.airspaceVisible
+        val subtitle = when {
             importing -> stringResource(R.string.airspace_status_importing)
-            !installed && AirspaceState.errorMessage != null -> stringResource(R.string.airspace_status_error)
-            !installed -> stringResource(R.string.airspace_status_missing)
-            status == AirspaceLayerStatus.ZOOM_OUT -> stringResource(
-                R.string.airspace_status_zoom_out,
-                catalog!!.zooms.first,
-                catalog.zooms.last,
-            )
-            else -> stringResource(
-                R.string.airspace_status_ready,
-                catalog!!.version,
-                sourceLabel,
-            )
-        }
-        val detail = catalog?.let {
-            stringResource(R.string.airspace_detail_zooms, it.zooms.first, it.zooms.last)
-        }
-        val actionLabel = when {
-            !installed -> stringResource(R.string.airspace_action_import)
-            status == AirspaceLayerStatus.ERROR -> stringResource(R.string.airspace_action_retry)
-            else -> null
+            catalog == null -> stringResource(R.string.airspace_pack_none)
+            catalog.isDemo -> stringResource(R.string.airspace_pack_demo)
+            else -> catalog.packName
         }
         LayerMenuOverlayRow(
             id = spec.id,
             title = stringResource(layerTitleRes(spec.id)),
-            status = statusText,
-            detail = detail,
+            subtitle = subtitle,
+            swatch = Color(spec.style.strokeColor),
+            demo = catalog?.isDemo == true,
             visible = visible,
-            enabled = installed,
-            actionLabel = actionLabel,
+            hasData = catalog != null,
+            actionLabel = if (catalog == null && !importing) {
+                stringResource(R.string.airspace_action_install)
+            } else {
+                null
+            },
         )
     }
-
-    val legendSpec = AirspaceLayers.all.firstOrNull { it.id in visibleLayers }
 
     fun requestImport() = importLauncher.launch(arrayOf("*/*"))
 
     return LayerMenuModel(
-        satellite = satellite,
+        satellite = AppPrefs.satelliteMap,
         standardLabel = stringResource(R.string.map_standard),
         satelliteLabel = stringResource(R.string.map_satellite),
         baseGroupLabel = stringResource(R.string.map_layer_group_base),
         overlayGroupLabel = stringResource(R.string.map_layer_group_overlay),
         rows = rows,
-        legendLabel = legendSpec?.let { stringResource(layerTitleRes(it.id)) },
-        legendColor = legendSpec?.let { Color(it.style.strokeColor) },
+        settingsLabel = stringResource(R.string.layer_settings),
         onSelectBaseMap = { value -> AppPrefs.saveSatelliteMap(value) },
         onToggleOverlay = { id ->
             if (AirspaceState.catalogOf(id) == null) {
@@ -191,18 +172,13 @@ fun rememberLayerMenu(context: Context): LayerMenuModel {
                 AppPrefs.saveAirspaceVisible(id, id !in AppPrefs.airspaceVisible)
             }
         },
-        onOverlayAction = { id ->
-            if (AirspaceState.catalogOf(id) == null) {
-                requestImport()
-            } else {
-                scope.launch { AirspaceRepository.refresh(appContext) }
-            }
-        },
+        onOverlayAction = { requestImport() },
+        onOpenLayerSettings = onOpenLayerSettings,
     )
 }
 
 /** 图层 id → 中文标题（新增图层时在这里加一条） */
-private fun layerTitleRes(id: String): Int = when (id) {
+internal fun layerTitleRes(id: String): Int = when (id) {
     AirspaceLayers.SUITABLE -> R.string.airspace_layer_suitable
     else -> R.string.airspace_layer_other
 }
@@ -210,8 +186,12 @@ private fun layerTitleRes(id: String): Int = when (id) {
 // ---------------- 菜单面板 ----------------
 
 /**
- * 图层菜单面板：底图（单选）+ 叠加图层（独立开关）+ 图例。
- * 由 [MapControls] 放在 Popup 里显示。
+ * 图层菜单面板：
+ *  - 底图（单选，选完关闭）
+ *  - 叠加图层（独立开关，开关后不关闭，就地看状态）
+ *  - 底部「图层设置」入口
+ *
+ * 顶部不再显示「图层」标题，也不再单独列图例（图例并入每行行首的色块）。
  */
 @Composable
 fun LayerMenuPanel(model: LayerMenuModel, onDismiss: () -> Unit) {
@@ -221,15 +201,8 @@ fun LayerMenuPanel(model: LayerMenuModel, onDismiss: () -> Unit) {
             .width(252.dp)
             .clip(RoundedCornerShape(16.dp))
             .background(colors.card)
-            .padding(vertical = 10.dp),
+            .padding(vertical = 8.dp),
     ) {
-        Text(
-            text = stringResource(R.string.map_layers),
-            style = DroneTypography.captionMedium.copy(fontWeight = FontWeight.SemiBold),
-            color = colors.mutedForeground,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-        )
-
         MenuGroupLabel(text = model.baseGroupLabel)
         BaseMapRow(
             icon = AppIcons.Map,
@@ -263,39 +236,40 @@ fun LayerMenuPanel(model: LayerMenuModel, onDismiss: () -> Unit) {
             )
         }
 
-        val legendLabel = model.legendLabel
-        val legendColor = model.legendColor
-        if (legendLabel != null && legendColor != null) {
-            HorizontalDivider(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                thickness = 1.dp,
-                color = colors.border,
+        HorizontalDivider(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            thickness = 1.dp,
+            color = colors.border,
+        )
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clickable {
+                    model.onOpenLayerSettings()
+                    onDismiss()
+                }
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = AppIcons.Layers,
+                contentDescription = null,
+                tint = colors.primary,
+                modifier = Modifier.size(18.dp),
             )
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = stringResource(R.string.map_layer_legend),
-                    style = DroneTypography.label,
-                    color = colors.mutedForeground,
-                )
-                Spacer(Modifier.width(8.dp))
-                Box(
-                    Modifier
-                        .size(12.dp)
-                        .clip(RoundedCornerShape(3.dp))
-                        .background(legendColor),
-                )
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    text = legendLabel,
-                    style = DroneTypography.label,
-                    color = colors.foreground,
-                )
-            }
+            Spacer(Modifier.width(10.dp))
+            Text(
+                text = model.settingsLabel,
+                style = DroneTypography.body,
+                color = colors.foreground,
+                modifier = Modifier.weight(1f),
+            )
+            Icon(
+                imageVector = Icons.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = colors.mutedForeground,
+                modifier = Modifier.size(16.dp),
+            )
         }
     }
 }
@@ -363,33 +337,33 @@ private fun OverlayRow(
             .padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            imageVector = AppIcons.Zone,
-            contentDescription = null,
-            tint = if (row.enabled) colors.primary else colors.mutedForeground,
-            modifier = Modifier.size(18.dp),
+        // 行首色块 = 图例：关闭时降透明度，仍能看出图层配色
+        Box(
+            Modifier
+                .size(16.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .background(row.swatch.copy(alpha = if (row.visible) 1f else 0.35f))
+                .border(1.dp, colors.border.copy(alpha = 0.5f), RoundedCornerShape(4.dp)),
         )
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
-            Text(
-                text = row.title,
-                style = DroneTypography.body,
-                color = if (row.enabled) colors.foreground else colors.mutedForeground,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = row.title,
+                    style = DroneTypography.body,
+                    color = if (row.hasData) colors.foreground else colors.mutedForeground,
+                )
+                if (row.demo) {
+                    Spacer(Modifier.width(6.dp))
+                    DemoBadge()
+                }
+            }
             Spacer(Modifier.height(2.dp))
             Text(
-                text = row.status,
+                text = row.subtitle,
                 style = DroneTypography.label,
                 color = colors.mutedForeground,
             )
-            if (row.detail != null) {
-                Spacer(Modifier.height(1.dp))
-                Text(
-                    text = row.detail,
-                    style = DroneTypography.micro,
-                    color = colors.mutedForeground.copy(alpha = 0.8f),
-                )
-            }
         }
         val actionLabel = row.actionLabel
         if (actionLabel != null) {
@@ -406,7 +380,7 @@ private fun OverlayRow(
             Switch(
                 checked = row.visible,
                 onCheckedChange = { onToggle() },
-                enabled = row.enabled,
+                enabled = row.hasData,
                 colors = SwitchDefaults.colors(
                     checkedTrackColor = colors.primary,
                     uncheckedTrackColor = colors.muted,
@@ -415,4 +389,19 @@ private fun OverlayRow(
             )
         }
     }
+}
+
+/** 「演示」徽标（演示数据必须与真实数据区分） */
+@Composable
+private fun DemoBadge() {
+    val colors = LocalDroneColors.current
+    Text(
+        text = stringResource(R.string.airspace_demo_badge),
+        style = DroneTypography.micro,
+        color = colors.warning,
+        modifier = Modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(colors.warning.copy(alpha = 0.16f))
+            .padding(horizontal = 5.dp, vertical = 1.dp),
+    )
 }

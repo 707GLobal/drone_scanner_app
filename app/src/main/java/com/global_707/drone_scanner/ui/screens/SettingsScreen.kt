@@ -32,6 +32,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.global_707.drone_scanner.R
+import com.global_707.drone_scanner.ui.theme.AppIcons
 import com.global_707.drone_scanner.ui.theme.DroneTypography
 import com.global_707.drone_scanner.ui.theme.LocalDroneColors
 
@@ -48,6 +49,7 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onSearchSettings: () -> Unit = {},
     onDisplaySettings: () -> Unit = {},
+    onLayerSettings: () -> Unit = {},
     onLogSettings: () -> Unit = {},
     onAbout: () -> Unit = {},
 ) {
@@ -79,6 +81,12 @@ fun SettingsScreen(
                     icon = Icons.Filled.Settings,
                     label = stringResource(R.string.display_settings),
                     onClick = onDisplaySettings,
+                )
+                SettingRow(
+                    // 官方 Material「layers」path 自绘（不引入 icons-extended）
+                    icon = AppIcons.Layers,
+                    label = stringResource(R.string.layer_settings),
+                    onClick = onLayerSettings,
                 )
                 SettingRow(
                     icon = Icons.AutoMirrored.Filled.List,

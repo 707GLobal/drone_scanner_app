@@ -3,136 +3,217 @@ package com.global_707.drone_scanner.ui.map
 import android.content.Context
 import com.global_707.drone_scanner.data.AppLogger
 import com.global_707.drone_scanner.data.airspace.AirspaceCatalog
-import com.global_707.drone_scanner.data.airspace.AirspaceLayerStatus
+import com.global_707.drone_scanner.data.airspace.AirspaceFeature
+import com.global_707.drone_scanner.data.airspace.AirspaceGeometry
 import com.global_707.drone_scanner.data.airspace.AirspaceRepository
-import com.global_707.drone_scanner.data.airspace.AirspaceState
+import com.global_707.drone_scanner.util.CoordinateConverter
+import com.global_707.drone_scanner.util.GeoPoint
+import com.global_707.drone_scanner.util.GeoRect
 import com.tencent.tencentmap.mapsdk.maps.TencentMap
-import com.tencent.tencentmap.mapsdk.maps.model.CameraPosition
+import com.tencent.tencentmap.mapsdk.maps.model.LatLng
+import com.tencent.tencentmap.mapsdk.maps.model.Polygon
+import com.tencent.tencentmap.mapsdk.maps.model.PolygonOptions
+import com.tencent.tencentmap.mapsdk.maps.model.Polyline
+import com.tencent.tencentmap.mapsdk.maps.model.PolylineOptions
 import com.tencent.tencentmap.mapsdk.maps.model.TileOverlay
 import com.tencent.tencentmap.mapsdk.maps.model.TileOverlayOptions
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 
 /**
  * 空域叠加层的地图侧宿主（**唯一接触腾讯地图 API 的空域代码**）。
  *
  * 职责：
- *  - 为每个"已开启且已安装"的图层挂/卸一个 `TileOverlay`；
- *  - 统一注册相机监听（腾讯的 setter 是单例式，必须单点分发），把当前缩放换算成图层状态；
- *  - 绝不调用 `map.clear()`：无人机标记由 `TencentMapBackend` 自己逐个移除，
- *    空域覆盖物由本类独占管理，两边生命周期互不干扰。
+ *  - 栅格图层：为每个"已开启且已选包"的图层挂/卸一个 `TileOverlay`（任何缩放级别都显示，
+ *    超出原生级别由 [TileOverzoom] 放大）；
+ *  - 矢量图层（演示数据、将来的矢量包）：把 `features()` 的 WGS-84 几何**逐顶点**转成 GCJ-02
+ *    后画 `Polygon` / `Polyline`；
+ *  - 相机监听**不在这里注册**：腾讯 `setOnCameraChangeListener` 是单 setter，
+ *    由 `TencentMapBackend` 统一注册后分发（见 `MapCameraState`）。
  *
- * 坐标系：瓦片包按 GCJ-02 网格生成时直接贴合底图；WGS-84 网格由
- * [AirspaceTileProvider] 做瓦片号换算（残余偏移见其 KDoc）。
+ * 绝不调用 `map.clear()`：无人机标记由 `TencentMapBackend` 自己逐个移除，两者互不干扰。
  */
-class TencentAirspaceLayer(private val context: Context) {
+class TencentAirspaceLayer(
+    private val context: Context,
+    private val scope: CoroutineScope,
+) {
 
     private var map: TencentMap? = null
-    private val overlays = mutableMapOf<String, TileOverlay>()
-
-    /** 已挂载图层的数据指纹（版本/级别/网格变化时必须重建覆盖物） */
+    private val tileOverlays = mutableMapOf<String, TileOverlay>()
     private val appliedKeys = mutableMapOf<String, String>()
+    private val polygons = mutableMapOf<String, MutableList<Polygon>>()
+    private val polylines = mutableMapOf<String, MutableList<Polyline>>()
+    private val vectorKeys = mutableMapOf<String, String>()
+    private var vectorJob: Job? = null
 
     /** 上一次同步时的底图类型：切换底图后强制重建瓦片层（部分 SDK 版本会清空覆盖物） */
     private var lastSatellite: Boolean? = null
 
-    private val cameraListener = object : TencentMap.OnCameraChangeListener {
-        override fun onCameraChange(position: CameraPosition) = Unit
-
-        override fun onCameraChangeFinished(position: CameraPosition) {
-            updateZoomStatus(position.zoom)
-        }
-    }
-
-    /** 绑定地图（幂等）；同一实例只注册一次相机监听 */
     fun attach(target: TencentMap) {
         if (map === target) return
         release()
         map = target
-        target.setOnCameraChangeListener(cameraListener)
     }
 
     /**
-     * 按"当前应显示的图层集合 + 已安装的元信息"同步覆盖物。
-     * 由 Compose 的 LaunchedEffect 在（地图就绪 / 开关变化 / 包版本变化）时调用。
+     * 按"当前应显示的图层集合 + 每层的数据"同步覆盖物。
+     * 由 Compose 在（地图就绪 / 开关变化 / 选包变化 / 演示模式变化）时调用。
      */
     fun sync(visibleLayers: Set<String>, catalogs: Map<String, AirspaceCatalog>, satellite: Boolean) {
         val target = map ?: return
 
         if (lastSatellite != null && lastSatellite != satellite) {
-            // 底图切换后重建：避免某些 SDK 版本在 mapType 变化时清掉瓦片层导致图层"消失"
-            overlays.values.forEach { runCatching { it.remove() } }
-            overlays.clear()
+            tileOverlays.values.forEach { runCatching { it.remove() } }
+            tileOverlays.clear()
             appliedKeys.clear()
         }
         lastSatellite = satellite
 
-        // 1) 卸载不再显示或数据已失效的图层
-        overlays.keys.toList().forEach { layerId ->
+        // 1) 卸载不再显示的图层
+        tileOverlays.keys.toList().forEach { layerId ->
             if (layerId !in visibleLayers || catalogs[layerId] == null) {
-                overlays.remove(layerId)?.let { runCatching { it.remove() } }
+                tileOverlays.remove(layerId)?.let { runCatching { it.remove() } }
                 appliedKeys.remove(layerId)
-                AirspaceState.setStatus(layerId, AirspaceLayerStatus.OFF)
             }
         }
+        (polygons.keys + polylines.keys).toSet().forEach { layerId ->
+            if (layerId !in visibleLayers || catalogs[layerId] == null) clearVectors(layerId)
+        }
 
-        // 2) 创建 / 更新需要显示的图层
+        // 2) 创建/更新需要显示的图层
         visibleLayers.forEach { layerId ->
             val catalog = catalogs[layerId] ?: return@forEach
-            val key = dataKey(catalog)
-            if (appliedKeys[layerId] == key) return@forEach
-            val source = AirspaceRepository.source(layerId) ?: return@forEach
-
-            overlays.remove(layerId)?.let { runCatching { it.remove() } }
-            val overlay = runCatching {
-                target.addTileOverlay(
-                    TileOverlayOptions()
-                        .tileProvider(AirspaceTileProvider(source, catalog))
-                        .visibleLevelRange(catalog.zooms.first, catalog.zooms.last)
-                        .zIndex(TILE_Z_INDEX),
-                )
-            }.onFailure {
-                AppLogger.e("Airspace", "overlay_add_failed layer=$layerId msg=${it.message}", it)
-            }.getOrNull()
-
-            if (overlay != null) {
-                overlays[layerId] = overlay
-                appliedKeys[layerId] = key
-                AppLogger.i(
-                    "Airspace",
-                    "overlay_added layer=$layerId version=${catalog.version} zooms=${catalog.zooms} crs=${catalog.tileCrs}",
-                )
+            if (catalog.isDemo) {
+                ensureDemoVector(target, catalog)
+            } else {
+                ensureTileOverlay(target, catalog)
             }
         }
-
-        updateZoomStatus(target.cameraPosition?.zoom)
     }
 
-    /** 释放全部覆盖物与地图引用（页面销毁时调用） */
     fun release() {
-        overlays.values.forEach { runCatching { it.remove() } }
-        overlays.clear()
+        vectorJob?.cancel()
+        vectorJob = null
+        tileOverlays.values.forEach { runCatching { it.remove() } }
+        tileOverlays.clear()
         appliedKeys.clear()
+        polygons.keys.toList().forEach { clearVectors(it) }
+        polylines.clear()
+        vectorKeys.clear()
         map = null
     }
 
-    /** 当前缩放是否落在数据包的级别范围内 → 更新图层状态（菜单据此显示提示） */
-    private fun updateZoomStatus(zoom: Float?) {
-        if (zoom == null) return
-        val z = zoom.toInt()
-        val catalogs = AirspaceState.catalogs
-        overlays.keys.toList().forEach { layerId ->
-            val catalog = catalogs[layerId] ?: return@forEach
-            AirspaceState.setStatus(
-                layerId,
-                if (z in catalog.zooms) AirspaceLayerStatus.READY else AirspaceLayerStatus.ZOOM_OUT,
+    // ---------- 栅格 ----------
+
+    private fun ensureTileOverlay(target: TencentMap, catalog: AirspaceCatalog) {
+        val key = dataKey(catalog)
+        if (appliedKeys[catalog.layerId] == key) return
+        val source = AirspaceRepository.source(catalog.layerId) ?: return
+
+        // 换包/换级别后，放大缓存必须失效（否则会显示旧数据）
+        TileOverzoom.clear()
+        tileOverlays.remove(catalog.layerId)?.let { runCatching { it.remove() } }
+        val overlay = runCatching {
+            target.addTileOverlay(
+                TileOverlayOptions()
+                    .tileProvider(AirspaceTileProvider(source, catalog))
+                    .zIndex(TILE_Z_INDEX),
+            )
+        }.onFailure {
+            AppLogger.e("Airspace", "overlay_add_failed layer=${catalog.layerId} msg=${it.message}", it)
+        }.getOrNull()
+
+        if (overlay != null) {
+            tileOverlays[catalog.layerId] = overlay
+            appliedKeys[catalog.layerId] = key
+            AppLogger.i(
+                "Airspace",
+                "overlay_added layer=${catalog.layerId} pack=${catalog.packName} id=${catalog.packId} zooms=${catalog.zooms}",
             )
         }
     }
 
+    // ---------- 矢量（演示数据 / 将来的矢量包） ----------
+
+    private fun ensureDemoVector(target: TencentMap, catalog: AirspaceCatalog) {
+        val key = "${catalog.packName}|${catalog.layerId}"
+        if (vectorKeys[catalog.layerId] == key && polygons.containsKey(catalog.layerId)) return
+        val source = AirspaceRepository.source(catalog.layerId) ?: return
+        vectorJob?.cancel()
+        vectorJob = scope.launch {
+            val features = runCatching { source.features(WORLD) }.getOrDefault(emptyList())
+            drawVectors(target, catalog, features)
+            vectorKeys[catalog.layerId] = key
+        }
+    }
+
+    private fun drawVectors(
+        target: TencentMap,
+        catalog: AirspaceCatalog,
+        features: List<AirspaceFeature>,
+    ) {
+        clearVectors(catalog.layerId)
+        val drawnPolygons = mutableListOf<Polygon>()
+        val drawnPolylines = mutableListOf<Polyline>()
+        features.forEach { feature ->
+            when (val geometry = feature.geometry) {
+                is AirspaceGeometry.Polygon -> {
+                    val rings = geometry.rings
+                        .map { ring -> ring.map { it.toLatLng() } }
+                        .filter { it.size >= 3 }
+                    if (rings.isEmpty()) return@forEach
+                    drawnPolygons += target.addPolygon(
+                        PolygonOptions()
+                            .add(rings.first())
+                            .setHolePoints(rings.drop(1))
+                            .fillColor(catalog.style.fillColor)
+                            .strokeColor(catalog.style.strokeColor)
+                            .strokeWidth(catalog.style.strokeWidthDp)
+                            .zIndex(VECTOR_Z_INDEX),
+                    )
+                }
+
+                is AirspaceGeometry.Line -> {
+                    val points = geometry.points.map { it.toLatLng() }
+                    if (points.size < 2) return@forEach
+                    drawnPolylines += target.addPolyline(
+                        PolylineOptions()
+                            .addAll(points)
+                            .color(catalog.style.strokeColor)
+                            .width(catalog.style.strokeWidthDp)
+                            .zIndex(VECTOR_Z_INDEX),
+                    )
+                }
+            }
+        }
+        polygons[catalog.layerId] = drawnPolygons
+        polylines[catalog.layerId] = drawnPolylines
+    }
+
+    private fun clearVectors(layerId: String) {
+        polygons.remove(layerId)?.forEach { runCatching { it.remove() } }
+        polylines.remove(layerId)?.forEach { runCatching { it.remove() } }
+        vectorKeys.remove(layerId)
+    }
+
+    /** WGS-84 → GCJ-02：空域坐标入图的**唯一**转换点 */
+    private fun GeoPoint.toLatLng(): LatLng {
+        val (lat, lng) = CoordinateConverter.wgs84ToGcj02(this.lat, this.lng)
+        return LatLng(lat, lng)
+    }
+
     private fun dataKey(catalog: AirspaceCatalog): String =
-        "${catalog.version}|${catalog.zooms.first}-${catalog.zooms.last}|${catalog.tileCrs}|${catalog.dir}"
+        "${catalog.packId}|${catalog.version}|${catalog.zooms.first}-${catalog.zooms.last}|${catalog.dir}"
 
     private companion object {
         /** 底图之上、标记之下 */
         const val TILE_Z_INDEX = 0
+
+        /** 矢量面压在同一层，位于瓦片之上 */
+        const val VECTOR_Z_INDEX = 1
+
+        /** 演示数据不看视口，用全世界范围即可 */
+        val WORLD = GeoRect(-85.0, -180.0, 85.0, 180.0)
     }
 }

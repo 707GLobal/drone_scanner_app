@@ -28,6 +28,7 @@ import com.global_707.drone_scanner.ui.screens.AboutScreen
 import com.global_707.drone_scanner.ui.screens.DisplaySettingsScreen
 import com.global_707.drone_scanner.ui.screens.DroneDetailScreen
 import com.global_707.drone_scanner.ui.screens.FullscreenMapScreen
+import com.global_707.drone_scanner.ui.screens.LayerSettingsScreen
 import com.global_707.drone_scanner.ui.screens.LogSettingsScreen
 import com.global_707.drone_scanner.ui.screens.MapHomeScreen
 import com.global_707.drone_scanner.ui.screens.SearchSettingsScreen
@@ -57,6 +58,7 @@ private val routeOrder = listOf(
     "fullscreen",
     "settings/search",
     "settings/display",
+    "settings/layers",
     "settings/log",
     "settings/about",
 )
@@ -108,6 +110,7 @@ private fun DroneScannerRoot() {
             "map" -> MapHomeScreen(
                 onOpenSettings = { navigateTo("settings") },
                 onOpenSearchSettings = { navigateTo("settings/search") },
+                onOpenLayerSettings = { navigateTo("settings/layers") },
                 onDroneClick = { drone ->
                     selectedDroneId = drone.id
                     navigateTo("detail")
@@ -121,12 +124,14 @@ private fun DroneScannerRoot() {
                         drone = selectedDrone,
                         onBack = { navigateTo("map") },
                         onEnterFullscreen = { navigateTo("fullscreen") },
+                        onOpenLayerSettings = { navigateTo("settings/layers") },
                     )
                 } else {
                     // 设备已从列表中消失（长时间未检测到），返回首页
                     MapHomeScreen(
                         onOpenSettings = { navigateTo("settings") },
                         onOpenSearchSettings = { navigateTo("settings/search") },
+                        onOpenLayerSettings = { navigateTo("settings/layers") },
                         onDroneClick = { navigateTo("map") },
                     )
                 }
@@ -138,11 +143,13 @@ private fun DroneScannerRoot() {
                     FullscreenMapScreen(
                         drone = selectedDrone,
                         onBack = { navigateTo("detail") },
+                        onOpenLayerSettings = { navigateTo("settings/layers") },
                     )
                 } else {
                     MapHomeScreen(
                         onOpenSettings = { navigateTo("settings") },
                         onOpenSearchSettings = { navigateTo("settings/search") },
+                        onOpenLayerSettings = { navigateTo("settings/layers") },
                         onDroneClick = { navigateTo("map") },
                     )
                 }
@@ -154,6 +161,7 @@ private fun DroneScannerRoot() {
                     onBack = { navigateTo("map") },
                     onSearchSettings = { navigateTo("settings/search") },
                     onDisplaySettings = { navigateTo("settings/display") },
+                    onLayerSettings = { navigateTo("settings/layers") },
                     onLogSettings = { navigateTo("settings/log") },
                     onAbout = { navigateTo("settings/about") },
                 )
@@ -167,6 +175,11 @@ private fun DroneScannerRoot() {
             "settings/display" -> {
                 BackHandler { navigateTo("settings") }
                 DisplaySettingsScreen(onBack = { navigateTo("settings") })
+            }
+
+            "settings/layers" -> {
+                BackHandler { navigateTo("settings") }
+                LayerSettingsScreen(onBack = { navigateTo("settings") })
             }
 
             "settings/log" -> {

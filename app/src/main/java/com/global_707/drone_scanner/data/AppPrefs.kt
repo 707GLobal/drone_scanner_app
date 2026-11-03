@@ -59,6 +59,9 @@ object AppPrefs {
     /** 需要显示的叠加图层 id 集合（当前只有 "suitable" 适飞空域；后续空域按同一模式追加） */
     var airspaceVisible by mutableStateOf<Set<String>>(emptySet())
 
+    /** 每个图层使用的数据包 id：layerId → packId（每层独立选择） */
+    var airspacePackByLayer by mutableStateOf<Map<String, String>>(emptyMap())
+
     fun init(context: Context) {
         if (prefs == null) {
             prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -73,6 +76,7 @@ object AppPrefs {
             demoMode = prefs?.getBoolean("demo_mode", false) ?: false
             // getStringSet 返回的集合可能与内部实例共享，必须复制一份再持有
             airspaceVisible = prefs?.getStringSet("airspace_visible", emptySet())?.toSet() ?: emptySet()
+            airspacePackByLayer = decodePackSelection(prefs?.getString("airspace_pack_by_layer", null))
         }
     }
 
@@ -125,5 +129,30 @@ object AppPrefs {
     fun saveAirspaceVisible(layerId: String, visible: Boolean) {
         airspaceVisible = if (visible) airspaceVisible + layerId else airspaceVisible - layerId
         prefs?.edit()?.putStringSet("airspace_visible", airspaceVisible)?.apply()
+    }
+
+    /** 为某个图层选择数据包；[packId] 为 null 表示清除选择 */
+    fun savePackForLayer(layerId: String, packId: String?) {
+        airspacePackByLayer = if (packId == null) {
+            airspacePackByLayer - layerId
+        } else {
+            airspacePackByLayer + (layerId to packId)
+        }
+        val encoded = airspacePackByLayer.entries.joinToString(";") { "${it.key}=${it.value}" }
+        prefs?.edit()?.putString("airspace_pack_by_layer", encoded)?.apply()
+    }
+
+    /** 反序列化 "layer=pack;layer=pack"（包 id 与图层 id 都只含 [A-Za-z0-9_-]） */
+    private fun decodePackSelection(raw: String?): Map<String, String> {
+        if (raw.isNullOrBlank()) return emptyMap()
+        val result = LinkedHashMap<String, String>()
+        raw.split(';').forEach { entry ->
+            val index = entry.indexOf('=')
+            if (index <= 0 || index == entry.length - 1) return@forEach
+            val layer = entry.substring(0, index).trim()
+            val pack = entry.substring(index + 1).trim()
+            if (layer.isNotEmpty() && pack.isNotEmpty()) result[layer] = pack
+        }
+        return result
     }
 }

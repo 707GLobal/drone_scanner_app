@@ -18,6 +18,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidPath
@@ -72,6 +73,20 @@ object TencentMapBackend : MapBackend {
 
     @Volatile
     private var tencentMap: TencentMap? = null
+
+    /**
+     * 唯一的相机监听：腾讯 `setOnCameraChangeListener` 是单 setter，
+     * 所有需要 bearing/zoom 的功能（指南针、图层状态）都从 [MapCameraState] 读。
+     */
+    private val CAMERA_LISTENER = object : TencentMap.OnCameraChangeListener {
+        override fun onCameraChange(position: CameraPosition) {
+            MapCameraState.update(position.bearing, position.zoom)
+        }
+
+        override fun onCameraChangeFinished(position: CameraPosition) {
+            MapCameraState.update(position.bearing, position.zoom)
+        }
+    }
 
     /** 我的位置（地图坐标 + 指南针朝向） */
     private data class MyPosition(val latLng: LatLng, val bearing: Float)
@@ -143,8 +158,9 @@ object TencentMapBackend : MapBackend {
         // 已添加的标记：重画时逐个移除（不再调用 map.clear()，否则会把空域叠加层一起清掉）
         val markers = remember { mutableListOf<Marker>() }
 
-        // 空域叠加层：瓦片挂载与相机监听都在这里，绝不触碰标记的生命周期
-        val airspaceLayer = remember { TencentAirspaceLayer(context) }
+        // 空域叠加层：只负责瓦片/矢量覆盖物，绝不触碰标记的生命周期
+        val airspaceScope = rememberCoroutineScope()
+        val airspaceLayer = remember { TencentAirspaceLayer(context, airspaceScope) }
         DisposableEffect(Unit) {
             onDispose { airspaceLayer.release() }
         }
@@ -301,10 +317,15 @@ object TencentMapBackend : MapBackend {
                 }
             }
 
-            // 空域叠加层：地图就绪 / 开关变化 / 数据包版本变化时同步覆盖物。
-            // 只增删空域自己的 TileOverlay，不触碰无人机标记。
+            // 相机监听：腾讯的 setOnCameraChangeListener 是单 setter，只能在这里注册一次，
+            // 再把 bearing/zoom 分发给全局 MapCameraState（指南针与图层判断都读它）。
+            // 同时开启旋转手势、隐藏 SDK 自带指南针（用我们自己的红色指针）。
             LaunchedEffect(mapReady, airspaceLayers, satellite, AirspaceState.catalogs) {
                 val map = mapView.getMap() ?: return@LaunchedEffect
+                map.setOnCameraChangeListener(CAMERA_LISTENER)
+                map.uiSettings.setRotateGesturesEnabled(true)
+                map.uiSettings.setCompassEnabled(false)
+                map.cameraPosition?.let { MapCameraState.update(it.bearing, it.zoom) }
                 airspaceLayer.attach(map)
                 airspaceLayer.sync(airspaceLayers, AirspaceState.catalogs, satellite)
             }

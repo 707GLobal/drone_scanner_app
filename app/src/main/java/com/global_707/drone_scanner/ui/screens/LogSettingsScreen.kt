@@ -16,6 +16,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -118,9 +119,12 @@ fun LogSettingsScreen(onBack: () -> Unit) {
 
     BackHandler { onBack() }
 
+    // 根容器必须铺 colors.background：否则深色模式下会露出 XML 主题的窗口底色（发灰），
+    // 与其它纯黑设置页不一致（1.1.5 修复）。
     Column(
         Modifier
-            .fillMaxSize(),
+            .fillMaxSize()
+            .background(colors.background),
     ) {
         HeaderBar(title = stringResource(R.string.log_settings), onBack = onBack)
         Column(
