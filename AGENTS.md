@@ -1,6 +1,6 @@
 # AGENTS.md — 无人机 RID 检测 App（Drone Scanner）
 
-> 面向后续开发/AI 助手的项目速览。请先读本文件，再读 `TESTING.md`（手工测试矩阵）。
+> 面向后续开发/AI 助手的项目速览。先读本文件；改 UI / 地图 / 射频相关代码前务必看 §9、§10。
 > 仓库：https://github.com/707GLobal/drone_scanner_app （分支 `main`，工作区干净）。
 
 ## 1. 项目是什么
@@ -117,8 +117,8 @@ release 构建开启 minify + shrinkResources；腾讯 SDK 自带 consumer rules
   `AirspaceRepository.kt`（每层选包 → 数据源 + 瓦片 LRU）、`AirspaceState.kt`（catalogs/packs 可观察状态）、
   `LocalPackSource.kt`、`DemoAirspaceSource.kt`（演示模式下的演示空域，矢量）。
   数据包格式见 `tools/README.md`，示例包用 `tools/make_sample_airspace_pack.py` 生成。
-- `screens/LayerSettingsScreen.kt` — **图层设置**独立页（与搜索/显示/日志并列）：每个图层一个数据包下拉 +
-  包列表（名称 + 大小）+ 删除 + 全局导入；`screens/SettingsScaffold.kt` 是设置页统一外壳（必须铺 `colors.background`）。
+- `screens/LayerSettingsScreen.kt` — **图层设置**独立页（与搜索/显示/日志并列）：页首一句总说明，
+  之后**每个图层一个区块**（色块 + 图层名 + 数据包下拉 +「导入」「删除」）；`SettingsScaffold` 统一外壳（必须铺 `colors.background`）。
 - `components/Components.kt` — 通用组件：`PulseDot`、`FrostedPill`、`FrostedBar`、`ScanningSpinner`、
   `RadarGlyph`、`StatusDot`、`SectionCard`。
 - `theme/` — `Color.kt`（Light/Dark `DroneColors` token）、`Theme.kt`（`DroneScannerTheme` +
@@ -134,8 +134,6 @@ release 构建开启 minify + shrinkResources；腾讯 SDK 自带 consumer rules
 
 - `res/values/strings.xml` — 全部用户可见文案（中文）。
 - `src/test/.../BluetoothRidParserTest.kt`（15 例）+ `AppLoggerTest.kt`（6 例）+ `ExampleUnitTest.kt`。
-- `TESTING.md` — 手工功能测试矩阵（注意：其中 §0.2 高德 AMap Key/安全码说明在迁移到
-  腾讯地图后已过期，Key 配置见 §6）。
 
 ## 4. 架构要点与数据流
 
@@ -275,7 +273,6 @@ droneReleaseKeyPassword=<口令>
 `assembleDebug` 不受影响。keystore 与口令必须单独备份——丢失后无法对已发布应用覆盖升级。
 
 环境要求：**必须真机**。RID 蓝牙/Wi-Fi 检测需要真实射频硬件；模拟器无法验证。
-（`TESTING.md` 中「高德 SDK 仅支持 ARM」等描述来自迁移前，判断时以实际腾讯 SDK 为准。）
 
 ## 7. 测试策略
 
@@ -290,8 +287,8 @@ droneReleaseKeyPassword=<口令>
   25 字节小端字节流（v1 `0x11`/`v2 0x12` 两套），覆盖位序分派、Message Pack 信封与条数上限、
   四个消息类型的字段偏移、未知/越界取值、GB 42590 试行标准布局交叉验证。改解析器务必同步更新。
   **注意：夹具必须按官方布局写**——旧夹具曾按错误布局构造，导致单测"全绿"却掩盖了真实的偏移 bug。
-- 其余（权限流、扫描面板、底部面板拖拽、演示模式、深色模式、导航按钮、地图标记）
-  依赖 `TESTING.md` 手工矩阵，改 UI 后在真机上逐条回归。
+- 其余（权限流、扫描面板、底部面板拖拽、演示模式、深色模式、导航按钮、地图标记、
+  图层导入/选包/删除/缩放对齐/指南针方向）**只能真机回归**：改 UI 或地图后必须在真机上逐条验证。
 
 ## 8. 常见改动入口速查
 
@@ -408,17 +405,21 @@ droneReleaseKeyPassword=<口令>
 ### 10.2 指北（指南针）
 
 - Canvas 自绘：红（北）/灰（南）双色指针 + 中心轴；
-- 指针角度 = `-bearing`，用最短路径插值（`tween(240)`），跨越 0°/360° 不整圈回甩；
+- 指针角度 = **屏幕上正北的方向角**（`MapCameraState.northAngle`：把地图中心与其「正北约 100 m 处」的点投影到屏幕后求夹角）。
+  **不要用 `bearing` 取反**：腾讯 SDK 的 bearing 正负与 Google 式定义相反，取反会转反；投影法在任何旋转/倾斜下都正确。
+  用最短路径插值（`tween(240)`），跨越 ±180° 不整圈回甩；
 - 点击 = 回正北；`setRotateGesturesEnabled(true)`、`setCompassEnabled(false)`（隐藏 SDK 自带指南针）。
 
 ### 10.3 叠加图层通用规则（对将来所有图层生效）
 
 1. **注册即显示**：只有 `AirspaceLayers.all` 里注册过的图层才出现在菜单/设置页；数据包里未注册的 `layerKey` 只记日志；
-2. **每层独立选包**：`AppPrefs.airspacePackByLayer`（layerId → packId），导入后若该层未选则自动选第一个含该层的包；
+2. **每层独立选包 + 每层一套入口**：`AppPrefs.airspacePackByLayer`（layerId → packId）；「图层设置」里每个图层一个区块，
+   区块内含数据包下拉 +「导入」+「删除」，顶部先给一句总说明（每个图层可独立选择数据包）；
+   导入只绑定当前图层（包不含该层会提示），删除会移除整个包并清空所有指向它的层选择；
 3. **图例**：行首 16dp 色块 = 图例（颜色取图层 `style.strokeColor`），关闭时降到 35% 透明度；**不单独列图例区**；
 4. **副标题**：只显示当前数据包名（`manifest.name`）；演示数据显示「演示数据」+「演示」徽标；
 5. **菜单结构**：底图组（单选，选完关闭）→ 叠加图层组（独立开关，开关后不关闭）→ 「图层设置」入口；顶部不显示「图层」标题；
-6. **颜色**：`#93F4F1`（填充 30% `0x4D93F4F1`、描边 85% `0xD993F4F1`）；栅格颜色烘焙在 PNG 里，改色需重新生成数据包；
+6. **颜色**：`#93F4F1` 填充 45%（`0x7393F4F1`）+ 更深的描边 `#3FA3B0` 不透明（`0xFF3FA3B0`，2.5dp）；栅格颜色烘焙在 PNG 里，改色需重新生成数据包；
 7. **坐标**：数据层只产出 WGS-84；**唯一转换点**是渲染层的 `GeoPoint.toLatLng()`（`wgs84ToGcj02`）。
 
 ### 10.4 缩放与 LOD（"任何缩放都显示"）

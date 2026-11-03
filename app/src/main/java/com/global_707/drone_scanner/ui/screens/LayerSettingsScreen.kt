@@ -21,8 +21,6 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -38,6 +36,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.global_707.drone_scanner.R
@@ -55,38 +54,56 @@ import kotlinx.coroutines.launch
 import java.util.Locale
 
 /**
- * 图层设置（与搜索/显示/日志设置并列的独立页面）：
+ * 图层设置（与搜索/显示/日志设置并列的独立页面）。
  *
- *  - **每个图层独立选择数据包**（下拉），只列出"包含该图层"的包；
- *  - 包列表只显示名称 + 大小（不展示描述/版本信息）；
- *  - 支持导入多个包、逐个删除（删除会用确认弹窗，并清掉指向它的选包）；
- *  - 行首色块与主页图层菜单使用同一套图例样式（颜色来自图层注册表）。
+ * 结构（对所有图层统一，后续接入禁飞区/限飞区自动套用）：
+ *  1. 顶部一句总说明（每个图层可独立选择数据包、数据只存本机）；
+ *  2. 每个图层一个区块：色块图例 + 图层名 + 数据包下拉 +「导入」「删除」；
+ *  3. 导入的文件只绑定到当前图层（若包里不含该图层会提示），删除会移除整个数据包
+ *     并清掉所有指向它的图层选择。
+ *
+ * 只显示数据包名称与大小，不展示描述/版本等冗余信息。
  */
 @Composable
 fun LayerSettingsScreen(onBack: () -> Unit) {
     val colors = LocalDroneColors.current
-    val context = androidx.compose.ui.platform.LocalContext.current
+    val context = LocalContext.current
     val appContext = context.applicationContext
     val scope = rememberCoroutineScope()
 
     var importing by remember { mutableStateOf(false) }
+    /** 本次导入要绑定的图层（每个图层的「导入」按钮都会设置它） */
+    var importTargetLayer by remember { mutableStateOf<String?>(null) }
     var pendingDelete by remember { mutableStateOf<PackSummary?>(null) }
 
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
+        val layerId = importTargetLayer
         scope.launch {
             importing = true
             val result = AirspaceRepository.importAndRefresh(appContext, uri)
             importing = false
             result.fold(
                 onSuccess = { pack ->
-                    Toast.makeText(
-                        appContext,
-                        appContext.getString(R.string.airspace_import_success, pack.name),
-                        Toast.LENGTH_LONG,
-                    ).show()
+                    if (layerId != null && layerId !in pack.layerIds) {
+                        Toast.makeText(
+                            appContext,
+                            appContext.getString(R.string.layer_settings_import_not_for_layer, pack.name),
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    } else {
+                        if (layerId != null) {
+                            AppPrefs.savePackForLayer(layerId, pack.id)
+                            AirspaceRepository.refresh(appContext)
+                        }
+                        Toast.makeText(
+                            appContext,
+                            appContext.getString(R.string.airspace_import_success, pack.name),
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    }
                 },
                 onFailure = { error ->
                     Toast.makeText(
@@ -105,53 +122,33 @@ fun LayerSettingsScreen(onBack: () -> Unit) {
     LaunchedEffect(Unit) { AirspaceRepository.refresh(appContext) }
 
     SettingsScaffold(title = stringResource(R.string.layer_settings), onBack = onBack) {
+        // 说明放最前面（用户要求：先说明"每个图层可独立选择"，再看具体配置）
+        Text(
+            text = stringResource(R.string.layer_settings_intro),
+            style = DroneTypography.label,
+            color = colors.mutedForeground,
+        )
+
+        Spacer(Modifier.height(16.dp))
+
         AirspaceLayers.all.forEachIndexed { index, spec ->
-            if (index > 0) Spacer(Modifier.height(20.dp))
+            if (index > 0) Spacer(Modifier.height(16.dp))
             LayerPackSection(
                 spec = spec,
                 packs = AirspaceState.packs,
                 selectedPackId = AppPrefs.airspacePackByLayer[spec.id],
+                busy = importing,
                 onSelect = { packId ->
                     AppPrefs.savePackForLayer(spec.id, packId)
                     scope.launch { AirspaceRepository.refresh(appContext) }
                 },
+                onImport = {
+                    importTargetLayer = spec.id
+                    importLauncher.launch(arrayOf("*/*"))
+                },
                 onDelete = { pendingDelete = it },
             )
         }
-
-        Spacer(Modifier.height(20.dp))
-
-        // 全局导入按钮（导入后按"包含哪些图层"自动分配给未选包的图层）
-        TextButton(
-            onClick = { importLauncher.launch(arrayOf("*/*")) },
-            enabled = !importing,
-        ) {
-            Icon(
-                imageVector = com.global_707.drone_scanner.ui.theme.AppIcons.Layers,
-                contentDescription = null,
-                tint = colors.primary,
-                modifier = Modifier.size(18.dp),
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                text = stringResource(
-                    if (importing) R.string.airspace_status_importing else R.string.layer_settings_import,
-                ),
-                color = colors.primary,
-                style = DroneTypography.body,
-            )
-        }
-
-        HorizontalDivider(
-            modifier = Modifier.padding(vertical = 12.dp),
-            thickness = 1.dp,
-            color = colors.border,
-        )
-        Text(
-            text = stringResource(R.string.layer_settings_hint),
-            style = DroneTypography.label,
-            color = colors.mutedForeground,
-        )
     }
 
     pendingDelete?.let { pack ->
@@ -193,23 +190,29 @@ fun LayerSettingsScreen(onBack: () -> Unit) {
     }
 }
 
-/** 单个图层的数据包选择区（与图层菜单同一套色块图例） */
+/**
+ * 单个图层的配置区块：色块 + 图层名 + 数据包下拉 +「导入」「删除」。
+ *
+ * 这是"每个图层一套"的统一模板：将来新增空域图层时不需要改这个页面。
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun LayerPackSection(
     spec: AirspaceLayerSpec,
     packs: List<PackSummary>,
     selectedPackId: String?,
+    busy: Boolean,
     onSelect: (String?) -> Unit,
+    onImport: () -> Unit,
     onDelete: (PackSummary) -> Unit,
 ) {
     val colors = LocalDroneColors.current
     val available = packs.filter { spec.id in it.layerIds }
-    val selectedName = available.firstOrNull { it.id == selectedPackId }?.name
+    val selected = available.firstOrNull { it.id == selectedPackId }
     var expanded by remember { mutableStateOf(false) }
 
     SectionCard {
-        // 标题行：色块（图例）+ 图层名
+        // 标题：色块（与主页图层菜单同一套图例样式）+ 图层名
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
                 Modifier
@@ -233,7 +236,7 @@ private fun LayerPackSection(
             onExpandedChange = { expanded = it },
         ) {
             OutlinedTextField(
-                value = selectedName ?: stringResource(R.string.layer_settings_none),
+                value = selected?.name ?: stringResource(R.string.layer_settings_none),
                 onValueChange = {},
                 readOnly = true,
                 label = { Text(stringResource(R.string.layer_settings_pack_label)) },
@@ -261,7 +264,9 @@ private fun LayerPackSection(
                 )
                 available.forEach { pack ->
                     DropdownMenuItem(
-                        text = { Text(pack.name) },
+                        text = {
+                            Text("${pack.name} · ${formatPackSize(pack.sizeBytes)}")
+                        },
                         onClick = {
                             onSelect(pack.id)
                             expanded = false
@@ -271,45 +276,41 @@ private fun LayerPackSection(
             }
         }
 
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = if (selected != null) {
+                stringResource(R.string.layer_settings_size, formatPackSize(selected.sizeBytes))
+            } else if (available.isEmpty()) {
+                stringResource(R.string.layer_settings_no_pack)
+            } else {
+                stringResource(R.string.layer_settings_none)
+            },
+            style = DroneTypography.label,
+            color = colors.mutedForeground,
+        )
 
-        if (available.isEmpty()) {
-            Text(
-                text = stringResource(R.string.layer_settings_no_pack),
-                style = DroneTypography.label,
-                color = colors.mutedForeground,
-            )
-        } else {
-            available.forEachIndexed { index, pack ->
-                if (index > 0) {
-                    HorizontalDivider(thickness = 0.5.dp, color = colors.border)
-                }
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = pack.name,
-                        style = DroneTypography.body,
-                        color = colors.foreground,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Text(
-                        text = formatPackSize(pack.sizeBytes),
-                        style = DroneTypography.label,
-                        color = colors.mutedForeground,
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    TextButton(onClick = { onDelete(pack) }) {
-                        Text(
-                            text = stringResource(R.string.layer_settings_delete),
-                            style = DroneTypography.label,
-                            color = colors.danger,
-                        )
-                    }
-                }
+        Spacer(Modifier.height(8.dp))
+
+        // 每个图层自己的「导入」「删除」入口
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = onImport, enabled = !busy) {
+                Text(
+                    text = stringResource(
+                        if (busy) R.string.airspace_status_importing else R.string.layer_settings_import,
+                    ),
+                    style = DroneTypography.body,
+                    color = colors.primary,
+                )
+            }
+            TextButton(
+                onClick = { selected?.let(onDelete) },
+                enabled = selected != null && !busy,
+            ) {
+                Text(
+                    text = stringResource(R.string.layer_settings_delete),
+                    style = DroneTypography.body,
+                    color = if (selected != null) colors.danger else colors.mutedForeground,
+                )
             }
         }
     }

@@ -28,23 +28,24 @@ import com.global_707.drone_scanner.ui.theme.LocalDroneColors
 /**
  * 指南针悬浮按钮（地图软件通用样式）：红色指针指向**正北**，随地图旋转同步转动。
  *
- * - 指针角度 = `-bearing`（地图顺时针转 θ，指针逆时针转 θ 才仍指向北）；
- * - 用最短路径插值，跨越 0°/360° 时不会整圈倒转；
+ * - 指针角度 = 屏幕上「正北」的方向角（`MapCameraState.northAngle`，由投影算出，
+ *   不依赖各 SDK 对 bearing 正负的不同定义，因此不会转反）；
+ * - 用最短路径插值，跨越 ±180° 时不会整圈倒转；
  * - 点击 = 重置北向（由调用方处理）。
  */
 @Composable
 fun CompassButton(
-    bearing: Float,
+    northAngle: Float,
     contentDescription: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalDroneColors.current
-    // 指针当前角度（不是 bearing 本身，避免 359°→1° 时整圈回甩）
+    // 指针当前角度（不是裸角度，避免 +170°→-170° 时整圈回甩）
     var needleAngle by remember { mutableFloatStateOf(0f) }
 
-    LaunchedEffect(bearing) {
-        val target = -bearing
+    LaunchedEffect(northAngle) {
+        val target = northAngle
         val delta = ((target - needleAngle + 540f) % 360f) - 180f
         animate(
             initialValue = needleAngle,

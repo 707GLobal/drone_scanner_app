@@ -46,7 +46,7 @@ filesDir/airspace/packs/<packId>/
   "crs": "GCJ02",
   "zooms": [3, 13],
   "bbox": [114.2, 30.4, 114.5, 30.7],
-  "style": { "fill": "#4D93F4F1", "stroke": "#D993F4F1", "strokeWidth": 2 },
+  "style": { "fill": "#7393F4F1", "stroke": "#FF3FA3B0", "strokeWidth": 3 },
   "attribution": "数据说明（仅日志/内部使用，界面不展示）",
   "layers": [
     { "id": "suitable", "dir": "suitable", "zooms": [3, 13] }
@@ -82,7 +82,7 @@ python tools/make_sample_airspace_pack.py
 ```
 
 产出 `tools/sample-airspace-pack.zip`：长沙附近一个**假的**矩形适飞区（带一个洞），
-`crs = GCJ02`、原生 z3–z13、额外烘焙 z14–z15、颜色 `#93F4F1`（填充 30% / 描边 85%）。
+`crs = GCJ02`、原生 z3–z13、额外烘焙 z14–z15、颜色 `#93F4F1`（填充 45%）+ 更深的描边 `#3FA3B0`。
 
 用途只有一个：在没有真实数据时验证「图层设置 → 导入 → 选包 → 瓦片显示 → 坐标对齐 → 缩放不跳动」整条链路。
 **它不是真实空域数据，不要用于任何实际飞行判断。**

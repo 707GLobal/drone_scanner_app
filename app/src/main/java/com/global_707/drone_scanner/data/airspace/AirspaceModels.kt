@@ -117,11 +117,12 @@ object AirspaceLayers {
             id = SUITABLE,
             kind = AirspaceKind.SUITABLE,
             defaultVisible = false,
-            // 透明浅青 #93F4F1：填充 30%（0x4D）、描边 85%（0xD9）
+            // 透明浅青 #93F4F1：填充 45%（0x73）；描边用更深的青 #3FA3B0 且不透明，
+            // 便于在浅色/卫星底图上强调边界（1.1.5 用户反馈"颜色过浅"后调整）
             style = AirspaceStyle(
-                fillColor = 0x4D93F4F1,
-                strokeColor = 0xD993F4F1.toInt(),
-                strokeWidthDp = 2f,
+                fillColor = 0x7393F4F1,
+                strokeColor = 0xFF3FA3B0.toInt(),
+                strokeWidthDp = 2.5f,
             ),
         ),
     )

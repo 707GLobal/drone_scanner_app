@@ -68,16 +68,18 @@
 
     <!-- 图层设置（与搜索/显示/日志设置并列的独立页面） -->
     <string name="layer_settings">图层设置</string>
+    <string name="layer_settings_intro">每个图层可独立选择数据包；数据只保存在本机、不联网。</string>
     <string name="layer_settings_pack_label">数据包</string>
     <string name="layer_settings_none">未选择</string>
     <string name="layer_settings_no_pack">还没有导入数据包</string>
-    <string name="layer_settings_import">导入数据包</string>
+    <string name="layer_settings_import">导入</string>
     <string name="layer_settings_delete">删除</string>
+    <string name="layer_settings_size">大小 %1$s</string>
+    <string name="layer_settings_import_not_for_layer">该数据包不包含此图层：%1$s</string>
     <string name="layer_settings_delete_title">删除数据包</string>
-    <string name="layer_settings_delete_message">将删除「%1$s」（%2$s），使用它的图层会变为不可用。此操作不可恢复。</string>
+    <string name="layer_settings_delete_message">将删除「%1$s」（%2$s）；所有使用该数据包的图层都会变为不可用。此操作不可恢复。</string>
     <string name="layer_settings_delete_cancel">取消</string>
     <string name="layer_settings_deleted">已删除数据包</string>
-    <string name="layer_settings_hint">每个图层可独立选择数据包；数据只保存在本机、不联网。</string>
 
     <!-- 详情页 -->
     <string name="back">返回</string>

@@ -75,16 +75,24 @@ object TencentMapBackend : MapBackend {
     private var tencentMap: TencentMap? = null
 
     /**
-     * 唯一的相机监听：腾讯 `setOnCameraChangeListener` 是单 setter，
-     * 所有需要 bearing/zoom 的功能（指南针、图层状态）都从 [MapCameraState] 读。
+     * 相机回调的统一分发：更新 bearing/zoom，并用**投影**算出"屏幕上的正北方向"。
+     *
+     * 为什么不直接用 bearing 反推指针角度：不同地图 SDK 对 bearing 正负的定义不一致
+     * （腾讯实测与 Google 式定义相反，直接取反会把指针转反）。
+     * 把"中心点"和"中心点正北约 100 m 的点"都投到屏幕上求方向角，就没这个问题。
      */
-    private val CAMERA_LISTENER = object : TencentMap.OnCameraChangeListener {
-        override fun onCameraChange(position: CameraPosition) {
-            MapCameraState.update(position.bearing, position.zoom)
-        }
-
-        override fun onCameraChangeFinished(position: CameraPosition) {
-            MapCameraState.update(position.bearing, position.zoom)
+    private fun dispatchCamera(map: TencentMap, position: CameraPosition) {
+        MapCameraState.update(position.bearing, position.zoom)
+        runCatching {
+            val center = position.target
+            val northLat = (center.latitude + 0.001).coerceAtMost(84.0)
+            val p0 = map.projection.toScreenLocation(center)
+            val p1 = map.projection.toScreenLocation(LatLng(northLat, center.longitude))
+            val dx = (p1.x - p0.x).toDouble()
+            val dy = (p1.y - p0.y).toDouble()
+            if (dx == 0.0 && dy == 0.0) return@runCatching
+            // 屏幕 y 向下：正北方向角 = atan2(dy, dx)（相对 +x 轴）再减去"上方"的 90°
+            MapCameraState.updateNorth(Math.toDegrees(atan2(dy, dx)).toFloat() + 90f)
         }
     }
 
@@ -322,10 +330,20 @@ object TencentMapBackend : MapBackend {
             // 同时开启旋转手势、隐藏 SDK 自带指南针（用我们自己的红色指针）。
             LaunchedEffect(mapReady, airspaceLayers, satellite, AirspaceState.catalogs) {
                 val map = mapView.getMap() ?: return@LaunchedEffect
-                map.setOnCameraChangeListener(CAMERA_LISTENER)
+                map.setOnCameraChangeListener(
+                    object : TencentMap.OnCameraChangeListener {
+                        override fun onCameraChange(position: CameraPosition) {
+                            dispatchCamera(map, position)
+                        }
+
+                        override fun onCameraChangeFinished(position: CameraPosition) {
+                            dispatchCamera(map, position)
+                        }
+                    },
+                )
                 map.uiSettings.setRotateGesturesEnabled(true)
                 map.uiSettings.setCompassEnabled(false)
-                map.cameraPosition?.let { MapCameraState.update(it.bearing, it.zoom) }
+                map.cameraPosition?.let { dispatchCamera(map, it) }
                 airspaceLayer.attach(map)
                 airspaceLayer.sync(airspaceLayers, AirspaceState.catalogs, satellite)
             }

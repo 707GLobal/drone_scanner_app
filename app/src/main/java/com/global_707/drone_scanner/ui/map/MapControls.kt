@@ -114,7 +114,7 @@ fun MapControls(
 
         // 指北：红色指针随地图旋转，点击回正北
         CompassButton(
-            bearing = MapCameraState.bearing,
+            northAngle = MapCameraState.northAngle,
             contentDescription = stringResource(R.string.map_reset_north),
             onClick = onResetNorth,
         )

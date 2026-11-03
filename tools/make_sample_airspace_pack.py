@@ -12,7 +12,7 @@
   - 瓦片**按 GCJ-02 网格出图**（crs = GCJ02）：腾讯底图就是 GCJ 网格，这样零偏移、缩放不跳动；
   - 原生级别 z3–z13（数据包实际精度），额外烘焙 z14–z15 两级（清晰一档，避免一上来就放大）；
     再高的级别由 App 运行期用父瓦片放大（overzoom），所以"任何缩放都显示"；
-  - 颜色 #93F4F1：填充 30%（#4D93F4F1）、描边 85%（#D993F4F1），与 App 图层注册表一致。
+  - 颜色 #93F4F1：填充 45%（#7393F4F1）、描边更深 #3FA3B0（#FF3FA3B0），与 App 图层注册表一致。
 """
 
 import json
@@ -39,8 +39,8 @@ HOLE = [
 ]
 NATIVE_MIN, NATIVE_MAX = 3, 13
 ZOOMS = range(NATIVE_MIN, 16)          # 原生 3–13，烘焙 14–15
-FILL = (0x93, 0xF4, 0xF1, 0x4D)        # #4D93F4F1
-STROKE = (0x93, 0xF4, 0xF1, 0xD9)      # #D993F4F1
+FILL = (0x93, 0xF4, 0xF1, 0x73)        # #7393F4F1（填充 45%）
+STROKE = (0x3F, 0xA3, 0xB0, 0xFF)      # #FF3FA3B0（描边更深、不透明，强调边界）
 PACK_NAME = "示例数据包-长沙"
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -123,9 +123,9 @@ def render_tile(zoom, tile_x, tile_y, outer_gcj, hole_gcj):
     image.paste(Image.new("RGBA", (TILE, TILE), FILL), (0, 0), mask)
     draw = ImageDraw.Draw(image)
     outer = tile_polygon(outer_gcj, zoom, tile_x, tile_y)
-    draw.line(outer + [outer[0]], fill=STROKE, width=2, joint="curve")
+    draw.line(outer + [outer[0]], fill=STROKE, width=3, joint="curve")
     hole = tile_polygon(hole_gcj, zoom, tile_x, tile_y)
-    draw.line(hole + [hole[0]], fill=STROKE, width=1)
+    draw.line(hole + [hole[0]], fill=STROKE, width=2)
     return image
 
 
@@ -169,7 +169,7 @@ def main():
         "crs": "GCJ02",
         "zooms": [NATIVE_MIN, NATIVE_MAX],
         "bbox": [min(lngs), min(lats), max(lngs), max(lats)],
-        "style": {"fill": "#4D93F4F1", "stroke": "#D993F4F1", "strokeWidth": 2},
+        "style": {"fill": "#7393F4F1", "stroke": "#FF3FA3B0", "strokeWidth": 3},
         "attribution": "测试数据：仅用于验证适飞空域图层渲染与坐标对齐，不是真实空域",
         "layers": [{"id": "suitable", "dir": "suitable", "zooms": [NATIVE_MIN, NATIVE_MAX]}],
     }
