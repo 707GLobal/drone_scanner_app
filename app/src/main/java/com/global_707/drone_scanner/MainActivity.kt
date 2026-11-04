@@ -8,6 +8,8 @@ import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -16,15 +18,25 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.snapshots.SnapshotStateList
+import androidx.compose.runtime.toMutableStateList
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
 import com.global_707.drone_scanner.data.AppLogger
 import com.global_707.drone_scanner.data.AppPrefs
 import com.global_707.drone_scanner.data.ScannerController
 import com.global_707.drone_scanner.ui.screens.AboutScreen
+import com.global_707.drone_scanner.ui.theme.AppMotion
 import com.global_707.drone_scanner.ui.screens.DisplaySettingsScreen
 import com.global_707.drone_scanner.ui.screens.DroneDetailScreen
 import com.global_707.drone_scanner.ui.screens.FullscreenMapScreen
@@ -51,29 +63,44 @@ class MainActivity : ComponentActivity() {
 }
 
 /** 页面层级（用于判断导航前进/后退方向） */
-private val routeOrder = listOf(
-    "map",
-    "detail",
-    "settings",
-    "fullscreen",
-    "settings/search",
-    "settings/display",
-    "settings/layers",
-    "settings/log",
-    "settings/about",
-)
 
 /**
  * 应用根导航（带 Material 页面过渡动画）：
  * 地图主页 → 飞机详情 → 全屏地图
  * 设置 → 搜索设置 / 显示设置 / 关于我们
  */
+/** 一个导航条目：路由 + 参数（详情/全屏带的无人机 id）。参数只属于该条目，不再用全局变量。 */
+private data class NavEntry(val route: String, val droneId: String? = null)
+
+/**
+ * 应用根导航（显式返回栈，语义对齐 Android 导航原则）：
+ *  - 一个 destination 只渲染一种界面；**参数失效就退栈**，绝不把首页塞进详情路由；
+ *  - 返回 = pop 当前条目，回到"进入时的那个页面"；
+ *  - 重复的「路由 + 参数」不入栈。
+ */
 @Composable
 private fun DroneScannerRoot() {
-    var route by rememberSaveable { mutableStateOf("map") }
+    val backStack = rememberSaveable(
+        saver = listSaver<SnapshotStateList<NavEntry>, String>(
+            save = { entries -> entries.flatMap { listOf(it.route, it.droneId.orEmpty()) } },
+            restore = { saved ->
+                saved.chunked(2)
+                    .map { NavEntry(it[0], it[1].ifEmpty { null }) }
+                    .toMutableStateList()
+            },
+        ),
+    ) { mutableStateListOf(NavEntry("map")) }
+    val currentEntry = backStack.last()
+    val currentRoute = currentEntry.route
+    // 1 = 前进（新页从右滑入），-1 = 返回（新页从左滑入）
     var navDirection by rememberSaveable { mutableIntStateOf(1) }
-    var selectedDroneId by rememberSaveable { mutableStateOf<String?>(null) }
-    val selectedDrone = ScannerController.drones.firstOrNull { it.id == selectedDroneId }
+
+    // 扫描只在首页运行：离开首页时停止。
+    // 必须放在路由层而不是页面的 onDispose：280ms 转场期间"新首页 start 后旧首页才 dispose"，
+    // 旧实现会在返回首页的瞬间把刚启动的扫描 stop 掉（表现为"有时停止扫描"）。
+    LaunchedEffect(currentRoute) {
+        if (currentRoute != "map") ScannerController.stop()
+    }
 
     // 阻止机器休眠（显示设置，全局生效）
     val activity = LocalActivity.current
@@ -87,109 +114,125 @@ private fun DroneScannerRoot() {
         onDispose { activity?.window?.clearFlags(flag) }
     }
 
-    fun navigateTo(newRoute: String) {
-        navDirection = if (routeOrder.indexOf(newRoute) >= routeOrder.indexOf(route)) 1 else -1
-        route = newRoute
+    fun push(route: String, droneId: String? = null) {
+        val entry = NavEntry(route, droneId)
+        if (backStack.last() == entry) return
+        navDirection = 1
+        backStack.add(entry)
     }
 
+    /** 返回上一页；栈底（地图首页）不处理，交给系统退出 App */
+    fun goBack() {
+        if (backStack.size <= 1) return
+        navDirection = -1
+        backStack.removeAt(backStack.lastIndex)
+    }
+
+    // Shared Axis 的 30dp 位移（在组合上下文里换算成 px，transitionSpec 内不能读 CompositionLocal）
+    val navShiftPx = with(LocalDensity.current) { AppMotion.NavShiftDp.dp.roundToPx() }
+
     AnimatedContent(
-        targetState = route,
+        targetState = currentEntry,
+        contentKey = { it.route },
         transitionSpec = {
+            // Material Shared Axis X（Google 主流做法）：
+            // 两个页面各平移 30dp、共 300ms；旧页前 100ms 淡出，新页延迟 100ms 后用 200ms 淡入。
+            // 比整屏滑动柔和，也不会像纯 crossfade 那样"发闷"。
+            val shift = navShiftPx
             val forward = navDirection > 0
-            if (forward) {
-                (slideInHorizontally(tween(280)) { it / 3 } + fadeIn(tween(280)))
-                    .togetherWith(slideOutHorizontally(tween(280)) { -it / 4 } + fadeOut(tween(280)))
-            } else {
-                (slideInHorizontally(tween(280)) { -it / 3 } + fadeIn(tween(280)))
-                    .togetherWith(slideOutHorizontally(tween(280)) { it / 4 } + fadeOut(tween(280)))
-            }
+            val slide: FiniteAnimationSpec<IntOffset> = tween(
+                durationMillis = AppMotion.NavSlideMs,
+                easing = AppMotion.Easing,
+            )
+            val inFade = fadeIn(
+                tween(
+                    durationMillis = AppMotion.NavFadeInMs,
+                    delayMillis = AppMotion.NavFadeInDelayMs,
+                    easing = AppMotion.Easing,
+                ),
+            )
+            val outFade = fadeOut(tween(AppMotion.NavFadeOutMs))
+            (
+                slideInHorizontally(slide) { if (forward) shift else -shift } + inFade
+                ) togetherWith (
+                slideOutHorizontally(slide) { if (forward) -shift else shift } + outFade
+                )
         },
         label = "route",
-    ) { currentRoute ->
-        when (currentRoute) {
+    ) { entry ->
+        when (entry.route) {
             "map" -> MapHomeScreen(
-                onOpenSettings = { navigateTo("settings") },
-                onOpenSearchSettings = { navigateTo("settings/search") },
-                onOpenLayerSettings = { navigateTo("settings/layers") },
-                onDroneClick = { drone ->
-                    selectedDroneId = drone.id
-                    navigateTo("detail")
-                },
+                onOpenSettings = { push("settings") },
+                onOpenSearchSettings = { push("settings/search") },
+                onOpenLayerSettings = { push("settings/layers") },
+                onDroneClick = { drone -> push("detail", drone.id) },
             )
 
             "detail" -> {
-                BackHandler { navigateTo("map") }
-                if (selectedDrone != null) {
-                    DroneDetailScreen(
-                        drone = selectedDrone,
-                        onBack = { navigateTo("map") },
-                        onEnterFullscreen = { navigateTo("fullscreen") },
-                        onOpenLayerSettings = { navigateTo("settings/layers") },
-                    )
+                BackHandler { goBack() }
+                val drone = ScannerController.drones.firstOrNull { it.id == entry.droneId }
+                if (drone == null) {
+                    // 参数失效（无人机已消失）：直接退栈，不渲染别的页面
+                    LaunchedEffect(entry) { goBack() }
                 } else {
-                    // 设备已从列表中消失（长时间未检测到），返回首页
-                    MapHomeScreen(
-                        onOpenSettings = { navigateTo("settings") },
-                        onOpenSearchSettings = { navigateTo("settings/search") },
-                        onOpenLayerSettings = { navigateTo("settings/layers") },
-                        onDroneClick = { navigateTo("map") },
+                    DroneDetailScreen(
+                        drone = drone,
+                        onBack = { goBack() },
+                        onEnterFullscreen = { push("fullscreen", drone.id) },
+                        onOpenLayerSettings = { push("settings/layers") },
                     )
                 }
             }
 
             "fullscreen" -> {
-                BackHandler { navigateTo("detail") }
-                if (selectedDrone != null) {
-                    FullscreenMapScreen(
-                        drone = selectedDrone,
-                        onBack = { navigateTo("detail") },
-                        onOpenLayerSettings = { navigateTo("settings/layers") },
-                    )
+                BackHandler { goBack() }
+                val drone = ScannerController.drones.firstOrNull { it.id == entry.droneId }
+                if (drone == null) {
+                    LaunchedEffect(entry) { goBack() }
                 } else {
-                    MapHomeScreen(
-                        onOpenSettings = { navigateTo("settings") },
-                        onOpenSearchSettings = { navigateTo("settings/search") },
-                        onOpenLayerSettings = { navigateTo("settings/layers") },
-                        onDroneClick = { navigateTo("map") },
+                    FullscreenMapScreen(
+                        drone = drone,
+                        onBack = { goBack() },
+                        onOpenLayerSettings = { push("settings/layers") },
                     )
                 }
             }
 
             "settings" -> {
-                BackHandler { navigateTo("map") }
+                BackHandler { goBack() }
                 SettingsScreen(
-                    onBack = { navigateTo("map") },
-                    onSearchSettings = { navigateTo("settings/search") },
-                    onDisplaySettings = { navigateTo("settings/display") },
-                    onLayerSettings = { navigateTo("settings/layers") },
-                    onLogSettings = { navigateTo("settings/log") },
-                    onAbout = { navigateTo("settings/about") },
+                    onBack = { goBack() },
+                    onSearchSettings = { push("settings/search") },
+                    onDisplaySettings = { push("settings/display") },
+                    onLayerSettings = { push("settings/layers") },
+                    onLogSettings = { push("settings/log") },
+                    onAbout = { push("settings/about") },
                 )
             }
 
             "settings/search" -> {
-                BackHandler { navigateTo("settings") }
-                SearchSettingsScreen(onBack = { navigateTo("settings") })
+                BackHandler { goBack() }
+                SearchSettingsScreen(onBack = { goBack() })
             }
 
             "settings/display" -> {
-                BackHandler { navigateTo("settings") }
-                DisplaySettingsScreen(onBack = { navigateTo("settings") })
+                BackHandler { goBack() }
+                DisplaySettingsScreen(onBack = { goBack() })
             }
 
             "settings/layers" -> {
-                BackHandler { navigateTo("settings") }
-                LayerSettingsScreen(onBack = { navigateTo("settings") })
+                BackHandler { goBack() }
+                LayerSettingsScreen(onBack = { goBack() })
             }
 
             "settings/log" -> {
-                BackHandler { navigateTo("settings") }
-                LogSettingsScreen(onBack = { navigateTo("settings") })
+                BackHandler { goBack() }
+                LogSettingsScreen(onBack = { goBack() })
             }
 
             "settings/about" -> {
-                BackHandler { navigateTo("settings") }
-                AboutScreen(onBack = { navigateTo("settings") })
+                BackHandler { goBack() }
+                AboutScreen(onBack = { goBack() })
             }
         }
     }

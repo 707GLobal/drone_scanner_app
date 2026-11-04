@@ -6,7 +6,7 @@ Remote ID 广播（ASTM F3411 / ASD-STAN EN 4709-002），解包后在腾讯地�
 
 - 应用名：无人机检测
 - 包名：`com.global_707.drone_scanner`
-- 当前版本：v1.1.5
+- 当前版本：v1.1.6
 - 语言：中文
 - 系统要求：Android 8.0（API 26）及以上；**Wi-Fi 检测通道需 Android 11（API 30）及以上**
 
@@ -43,6 +43,9 @@ Remote ID 广播（ASTM F3411 / ASD-STAN EN 4709-002），解包后在腾讯地�
 - **图层菜单**：点地图左上角图层按钮弹出「底图 / 叠加图层」菜单——底图单选（标准 / 卫星），
   叠加图层各自独立开关，开关后不关闭菜单；菜单底部可进入「图层设置」。
 - **指南针**：红色指针随地图旋转实时指北（投影法计算，不受各 SDK bearing 定义差异影响），点击回正北。
+- **字段可复制**：点击详情页任意字段即复制（原生点按效果 +「xxx 复制成功」提示），
+  「基本信息」右侧可一键复制全部信息。
+- **返回逻辑**：从哪个页面进入就退回哪个页面（不再固定回"设置"或"首页"）。
 - 深色模式、可拖拽无人机列表、一键跳转外部导航。
 
 ### 适飞空域图层（离线包）
@@ -114,7 +117,7 @@ Remote ID 广播（ASTM F3411 / ASD-STAN EN 4709-002），解包后在腾讯地�
 
 ```bash
 ./gradlew assembleDebug        # 构建 debug APK
-./gradlew testDebugUnitTest    # 运行单元测试（46 例：RID 解析、日志、瓦片数学、坐标反解、JSON、manifest 校验）
+./gradlew testDebugUnitTest    # 运行单元测试（50 例：RID 解析、日志、瓦片数学、坐标反解、JSON、manifest 校验）
 ./gradlew assembleRelease      # 构建 release APK（minify + shrinkResources）
 ```
 

@@ -198,9 +198,10 @@ fun LayerMenuPanel(model: LayerMenuModel, onDismiss: () -> Unit) {
     val colors = LocalDroneColors.current
     Column(
         Modifier
-            .width(252.dp)
+            .width(mapMenuWidth())
             .clip(RoundedCornerShape(16.dp))
-            .background(colors.card)
+            .background(colors.card.copy(alpha = 0.82f))
+            .border(1.dp, colors.border.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
             .padding(vertical = 8.dp),
     ) {
         MenuGroupLabel(text = model.baseGroupLabel)
@@ -241,36 +242,14 @@ fun LayerMenuPanel(model: LayerMenuModel, onDismiss: () -> Unit) {
             thickness = 1.dp,
             color = colors.border,
         )
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .clickable {
-                    model.onOpenLayerSettings()
-                    onDismiss()
-                }
-                .padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                imageVector = AppIcons.Layers,
-                contentDescription = null,
-                tint = colors.primary,
-                modifier = Modifier.size(18.dp),
-            )
-            Spacer(Modifier.width(10.dp))
-            Text(
-                text = model.settingsLabel,
-                style = DroneTypography.body,
-                color = colors.foreground,
-                modifier = Modifier.weight(1f),
-            )
-            Icon(
-                imageVector = Icons.Filled.KeyboardArrowRight,
-                contentDescription = null,
-                tint = colors.mutedForeground,
-                modifier = Modifier.size(16.dp),
-            )
-        }
+        MapMenuActionRow(
+            icon = AppIcons.Layers,
+            label = model.settingsLabel,
+            onClick = {
+                model.onOpenLayerSettings()
+                onDismiss()
+            },
+        )
     }
 }
 

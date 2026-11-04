@@ -668,6 +668,8 @@ object ScannerController {
             operatorId = d.operatorId,
             operatorDistanceM = operatorDistance?.toInt(),
             signalStrength = rssiToSignal(d.rssi),
+            // -100 是 DetectedDevice 的初始值（没有任何上报），按未知处理
+            rssiDbm = d.rssi.takeIf { it > -100 },
             protocol = d.protocol,
             frequency = d.frequency,
             lastSeenSeconds = ((System.currentTimeMillis() - d.lastSeen) / 1000).toInt(),

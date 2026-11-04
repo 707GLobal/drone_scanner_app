@@ -18,7 +18,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidPath
@@ -33,7 +32,7 @@ import com.global_707.drone_scanner.data.airspace.AirspaceState
 import com.global_707.drone_scanner.util.CoordinateConverter
 import com.global_707.drone_scanner.util.NavigationLauncher
 import com.tencent.tencentmap.mapsdk.maps.CameraUpdateFactory
-import com.tencent.tencentmap.mapsdk.maps.MapView
+import com.tencent.tencentmap.mapsdk.maps.TextureMapView
 import com.tencent.tencentmap.mapsdk.maps.TencentMap
 import com.tencent.tencentmap.mapsdk.maps.model.BitmapDescriptorFactory
 import com.tencent.tencentmap.mapsdk.maps.model.CameraPosition
@@ -151,7 +150,9 @@ object TencentMapBackend : MapBackend {
     ) {
         val context = LocalContext.current
         val lifecycleOwner = LocalLifecycleOwner.current
-        val mapView = remember { MapView(context) }
+        // TextureMapView（TextureView）：整页 alpha/动画可参与合成。
+    // 原来的 MapView 是 SurfaceView，转场时被系统单独合成，表现为「地图硬切、只有浮层在淡入淡出」。
+    val mapView = remember { TextureMapView(context) }
         var cameraMoved by remember { mutableStateOf(false) }
         // 入口相机决策只做一次：首页=本机位置，详情页/全屏页=无人机
         var initialCentered by remember { mutableStateOf(false) }
@@ -167,8 +168,8 @@ object TencentMapBackend : MapBackend {
         val markers = remember { mutableListOf<Marker>() }
 
         // 空域叠加层：只负责瓦片/矢量覆盖物，绝不触碰标记的生命周期
-        val airspaceScope = rememberCoroutineScope()
-        val airspaceLayer = remember { TencentAirspaceLayer(context, airspaceScope) }
+        // 矢量绘制是同步的（见 TencentAirspaceLayer），因此不需要协程作用域
+        val airspaceLayer = remember { TencentAirspaceLayer(context) }
         DisposableEffect(Unit) {
             onDispose { airspaceLayer.release() }
         }

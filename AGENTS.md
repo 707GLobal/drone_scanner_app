@@ -8,7 +8,7 @@
 一款 Android **无人机检测（Remote ID 侦查）** 应用：通过蓝牙与 Wi-Fi 监听附近无人机的
 RID（Remote ID，ASTM F3411 / ASD-STAN EN 4709-002）广播，解包后在腾讯地图上展示
 序列号、速度、高度、航向、操作员等真实字段。UI 全中文，包名/应用 ID
-`com.global_707.drone_scanner`，应用名「无人机检测」，当前版本 v1.1.5。
+`com.global_707.drone_scanner`，应用名「无人机检测」，当前版本 v1.1.6。
 
 两条射频承载，**内部消息格式完全相同**（25 字节定长消息；解析器只有一张消息类型表）：
 
@@ -85,9 +85,11 @@ release 构建开启 minify + shrinkResources；腾讯 SDK 自带 consumer rules
 
 ### ui/ — Compose 层
 
-- `screens/MapHomeScreen.kt` — 首页：全屏地图 + 扫描状态按钮/面板 + 可拖拽底部无人机列表面板
+- `screens/MapHomeScreen.kt` — 首页：全屏地图 + 扫描状态药丸（统一菜单 `ScanStatusMenu`）+ 可拖拽底部无人机列表面板
   （收起约 1/3 屏、展开约 85%）；**扫描生命周期与权限入口都在这**（见 §4）。
-- `screens/DroneDetailScreen.kt` — 详情页 + 全屏地图页 + 共用 `HeaderBar`（M3 CenterAlignedTopAppBar）。
+- `screens/DroneDetailScreen.kt` — 详情页 + 全屏地图页 + 共用 `HeaderBar`（M3 CenterAlignedTopAppBar）；
+  字段行点按复制（Toast），「基本信息」右侧可复制全部信息；**分组标题固定 36dp 行高**（三个分组间距一致）；
+  信号强度显示原始 `RSSI dBm`（`Drone.rssiDbm`，未知显示 —）。
 - `screens/SettingsScreen.kt`、`screens/SettingsSubScreens.kt` — 设置主页与
   `SearchSettingsScreen`（**顶部扫描模式滑块** + 本机能力状态 + 扫描开关 + 扫描优先级；
   外置天线模式下隐藏本机射频内容、显示预留的外置天线选项）、`DisplaySettingsScreen`（阻止休眠）、
@@ -100,9 +102,13 @@ release 构建开启 minify + shrinkResources；腾讯 SDK 自带 consumer rules
   `centerOnMyLocationOnce` 控制**入口相机**：首页传 `true`（定位到本机位置），详情/全屏页默认 `false`（定位到该无人机）。
 - `map/TencentMapBackend.kt` — 腾讯地图实现（当前唯一后端）；入口相机只决策一次（`initialCentered`），
   入口后新发现的无人机仍会跟随（`cameraMoved`）。
-- `map/MapControls.kt` — 地图悬浮控件（图层/定位/指北）：三颗按钮统一由 `map/MapFloatingControls.kt`
-  的 `MapFloatingButton` 渲染，两个弹出菜单统一由 `MapPopupSurface` 渲染（同一套缩放淡入动画）。
+- `map/MapChrome.kt` — 地图浮层的**唯一设计实现**：`MapChromeButton`（圆钮，四态 + 按压缩放）、
+  `MapChromeLabelPill`（图标+文字药丸）、`MapPopupSurface`（菜单外壳，统一动画）。新控件必须复用它。
+- `map/MapControls.kt` — 地图悬浮控件组（图层/定位/指北）：三颗按钮都来自 `MapChrome`，
+  菜单统一走 `MapPopupSurface`；互斥状态见 `map/MapOverlayState.kt`。
   图层菜单模型见 `map/LayerMenu.kt` 的 `rememberLayerMenu`；指北用 `map/CompassButton.kt`（红色指针随地图旋转）。
+- `map/MapOverlayState.kt` — 地图浮层状态机（`MapOverlay.{NONE,LAYERS,LOCATE,SCAN}`）：同一时间只允许一个菜单。
+- `screens/ScanStatusMenu.kt` — 右上角扫描状态菜单（与图层菜单同款卡片）；`channelErrorText()` 也在这里。
 - `map/MapCameraState.kt` — 相机 bearing/zoom 的全局可观察状态；**腾讯 `setOnCameraChangeListener` 是单 setter**，
   只能由 `TencentMapBackend` 注册一次后分发（见 §10）。
 - `map/TileOverzoom.kt` — 运行期瓦片放大（父瓦片裁切 + 双线性放大 + 缓存 + 并发上限），
@@ -141,14 +147,22 @@ release 构建开启 minify + shrinkResources；腾讯 SDK 自带 consumer rules
 `mutableStateOf` 属性；任何 Composable 读取它们即自动订阅重组。改动设置/扫描状态不要另建
 状态副本，直接调单例的 `saveXxx` / 控制器方法。
 
-**手动页面导航**：不用 navigation-compose。`MainActivity.DroneScannerRoot` 用字符串 `route`
-状态 + `AnimatedContent`（280ms 滑入/淡入过渡）驱动页面切换；前进/后退方向由
-`routeOrder` 列表索引比较决定。**新增页面必须登记进 `routeOrder` 并在 `when(route)` 加分支**，
-否则过渡方向异常；返回手势用各 route 内的 `BackHandler`。
+**手动页面导航（显式返回栈，语义对齐 Android 导航原则）**：不用 navigation-compose。
+`MainActivity.DroneScannerRoot` 维护 `backStack: SnapshotStateList<NavEntry>`，其中
+`NavEntry(route, droneId)` = 「路由 + 参数」；`rememberSaveable` 用 `listSaver` 拍平成字符串保存。
 
-**扫描生命周期（重要）**：`MapHomeScreen` 首次组合且权限齐备时 `ScannerController.start()`，
-`DisposableEffect` `onDispose` 时 `stop()`。即**只有停留在首页时扫描才运行**；进入详情/设置页会停扫，
-返回首页重启。`detected` 累积表不清空，因此列表仍保留历史设备。
+- `push(route, droneId)` 入栈（相同 `route+droneId` 不重复入栈），`goBack()` 出栈；
+- **详情/全屏从自己那条 entry 的 `droneId` 取数据**，不要用全局 `selectedDroneId`；
+- **参数失效（无人机已消失）时直接 `LaunchedEffect { goBack() }` 退栈**，绝不在详情路由里渲染首页
+  （1.1.6 的"详情点不进去/菜单错乱"就是这条兜底造成的）；
+- 全屏返回 = `goBack()`（**不要 `push("detail")`**，会叠出重复详情条目）；
+- 新增页面只需在 `when(entry.route)` 加分支（不再有 `routeOrder`），`onBack`/`BackHandler` 一律 `goBack()`；
+- 栈底 `"map"` 的返回交给系统退出 App。
+
+**扫描生命周期（重要）**：**由路由驱动**——`MainActivity` 的 `LaunchedEffect(currentRoute)` 在离开首页时
+`stop()`；`MapHomeScreen` 首次组合且权限齐备时 `start()`（`start` 本身幂等）。
+**不要在页面 `onDispose` 里 stop**：`AnimatedContent` 转场期间，新首页可能已经 start、旧首页才 dispose，
+会把刚启动的扫描停掉（1.1.6 修复的"返回后偶发停止扫描"）。`detected` 累积表不清空，列表仍保留历史设备。
 
 **扫描模式（`AppPrefs.scanMode`，设置在「搜索设置」页顶部滑块：手机直连 / 外置天线）**：
 
@@ -179,7 +193,7 @@ parseMessages() → mergeInto("wifi:"+BSSID, …)`。
 回调内用解析器判定，原因见 §9）；Wi-Fi 扫描协程按系统节流间隔（约 20s）触发 `startScan()`，
 每 5s 读一次 `scanResults`。
 
-**扫描状态错误码语义**（界面据此提示）：见 `ScanState`；映射文案在 `MapHomeScreen` 的
+**扫描状态错误码语义**（界面据此提示）：见 `ScanState`；映射文案在 `ScanStatusMenu.kt` 的
 `channelErrorText()`（环境错误用自定义文案，正数回退显示系统错误码）。
 
 **状态判定**（`ScannerController.toDrone`）：无序列号 → `WARNING`；`idType` 为 3/4（UTM/会话 ID）
@@ -244,7 +258,7 @@ Windows 下用 wrapper：
 ```bash
 gradlew.bat assembleDebug                 # 构建 debug APK
 gradlew.bat installDebug                  # 安装到已连接真机
-gradlew.bat testDebugUnitTest             # 跑单测（46 例：RID 解析 15 + 日志 6 + 瓦片数学 6 + 坐标 3 + JSON 6 + manifest 9 + 模板 1）
+gradlew.bat testDebugUnitTest             # 跑单测（50 例：RID 解析 15 + 日志 6 + 瓦片数学 6 + 坐标 3 + JSON 6 + manifest 9 + 演示空域 4 + 模板 1）
 gradlew.bat assembleRelease               # release（minify + shrink + 正式签名）
 ```
 
@@ -276,11 +290,12 @@ droneReleaseKeyPassword=<口令>
 
 ## 7. 测试策略
 
-- 自动化测试共 46 例：`BluetoothRidParserTest`（15 例，见下）+ `AppLoggerTest`（6 例：时长/体积格式化、
+- 自动化测试共 50 例：`BluetoothRidParserTest`（15 例，见下）+ `AppLoggerTest`（6 例：时长/体积格式化、
   日志行格式、异常堆栈、hex 转储、日志文件命名规则）+ `TileMathTest`（6 例：文档示例瓦片号反查、
   四至/中心点、GCJ→WGS 瓦片换算方向、纬度夹取、经度归一化）+ `CoordinateConverterTest`（3 例：
   GCJ 反解往返精度、境外原样、偏移量级）+ `MiniJsonTest`（6 例）+ `AirspaceManifestTest`（9 例：
-  合法解析、非法 schema/crs/tileSize/id/dir/zooms/bbox/颜色、相对路径安全）+ `ExampleUnitTest`（1 例）。
+  合法解析、非法 schema/crs/tileSize/id/dir/zooms/bbox/颜色、相对路径安全）+ `DemoAirspaceSourceTest`（4 例：
+  四条带结构、面积恰好等于外框减内框、中心不属于任何带、各带互不重叠）+ `ExampleUnitTest`（1 例）。
 - 适飞空域相关逻辑（瓦片数学、manifest 校验、JSON、坐标反解）**全部是纯 Kotlin**，改动后必须保持
   单测可通过；`TencentAirspaceLayer`（瓦片挂载/相机监听）与图层菜单只能真机验证。
 - `BluetoothRidParserTest`（15 例）——按 ASTM F3411 / ASD-STAN 官方布局构造
@@ -295,7 +310,7 @@ droneReleaseKeyPassword=<口令>
 | 想做什么 | 改哪里 |
 |---|---|
 | 新增设置项 | `AppPrefs`（属性 + `saveXxx`）→ 设置页 UI → 消费点读取 |
-| 新增页面 | 在 `MainActivity.kt` 加 route + `routeOrder` + `when` 分支 + `BackHandler` |
+| 新增页面 | 在 `MainActivity.kt` 加 route 常量 + `when(entry.route)` 分支 + `BackHandler` |
 | 解析新 RID 消息类型 | `BluetoothRidParser` + `Drone.kt` 字段 + `ScannerController.DetectedDevice.merge`/`toDrone` + 详情页表格 + 单测 |
 | 地图标记样式/相机行为 | `TencentMapBackend`（位图绘制函数在文件底部） |
 | 换地图 SDK | 实现 `MapBackend` 并替换 `MapBackendProvider.backend` |
@@ -386,21 +401,40 @@ droneReleaseKeyPassword=<口令>
   换设备都**不需要**动腾讯控制台，只有改 applicationId 才要改「授权应用」。
   真需要「Key 防冒用」时，腾讯只在 WebService API 侧提供域名白名单 / 授权 IP / SK 签名校验，
   与 Android 地图 SDK 鉴权无关，别混为一谈。
+- **演示空域的矢量绘制必须同步、且不要用"洞"**：1.1.5 的演示环用 `setHolePoints` 挖洞 + 协程异步绘制，
+  两次 `sync()` 交错时会重复叠色或漏画（表现为"中心块只在某些时候出现"，切换深浅色/重进页面后又不同）。
+  1.1.6 起：环拆成 4 条矩形带、同步幂等绘制、切底图主动重画（见 §10.6）。
+- **不要在页面 `onDispose` 里停扫描**：`AnimatedContent` 转场期间新页面先 start、旧页面后 dispose，
+  旧实现会把刚启动的扫描停掉（"详情页返回后偶发停止扫描"）。扫描生命周期只由 `MainActivity` 的路由
+  `LaunchedEffect(currentRoute)` 驱动。
 - AGP 9 的 `compileSdk` 是块状新 DSL；旧工程写法（`compileSdk = 36`）在此会报错，别顺手改回去。
 
 ## 10. 地图 UI 与图层设计规范（1.1.5 起）
 
-### 10.1 地图悬浮控件（三颗按钮 + 两个弹出菜单）
+### 10.1 地图悬浮控件（统一设计规范）
+
+**唯一实现**：`ui/map/MapChrome.kt` —— `MapChromeButton`（圆钮）/ `MapChromeLabelPill`（图标+文字药丸）/
+`MapPopupSurface`（菜单外壳）。任何地图页的新控件都必须复用，禁止另写尺寸/透明度/动画。
 
 | 属性 | 规范值 |
 |---|---|
-| 按钮 | 44dp 圆形，`colors.card@0.72` 背景，1dp `colors.border@0.4` 描边；激活时描边 1.5dp `colors.primary@0.8` |
-| 图标 | 20dp，`colors.primary@0.92`（指北按钮例外，见 10.2） |
-| 排列 | 纵向 8dp 间距，左上角距设置药丸 52dp |
-| 弹出菜单 | 圆角 16dp、`colors.card`、宽 252dp；水平偏移 52dp；**两个菜单同一套动画**：`scaleIn(0.92)+fadeIn(160ms)` / `scaleOut(0.92)+fadeOut(120ms)` |
-| 互斥 | 打开一个自动收起另一个；点外部/返回键关闭 |
+| 圆钮尺寸 | 44dp 圆形；药丸高约 40dp（水平 12dp / 垂直 10dp 内边距，圆角 50%） |
+| 背景 | `colors.card @ 0.72`（不要 0.9、不要无描边） |
+| 描边（默认） | 1dp `colors.border @ 0.4` |
+| 描边（激活） | 1.5dp `colors.primary @ 0.9`，**仅当该按钮自己的菜单打开** |
+| 图标 | 圆钮 20dp、药丸 18dp，`colors.primary @ 0.92` |
+| 按压反馈 | 整体缩放 0.96，`tween(AppMotion.PressMs=120)`；所有圆钮/药丸/菜单一致 |
+| 菜单 | 圆角 16dp、`colors.card @ 0.82`、1dp `colors.border @ 0.4` 描边、宽 252dp；`scaleIn(0.95)+fadeIn(160)` / `scaleOut(0.95)+fadeOut(120)` |
+| 菜单对齐 | 圆钮菜单：**顶边 = 按钮顶边**、左边缘 = 按钮右边缘 + 8dp（`Alignment.TopStart`）；药丸菜单：右边缘对齐药丸、顶部 = 药丸底部 + 8dp（`Alignment.TopEnd`） |
+| 菜单宽度 | `mapMenuWidth()` = `min(252dp, 屏宽 - 32dp)`，小屏不越界；不要直接写死 252dp |
+| 动效 token | 统一取 `ui/theme/Motion.kt` 的 `AppMotion`（路由 Shared Axis 300 / 菜单进 160 出 120 / 按压 120 / 状态 200）；不要在页面里另写时长 |
+| 菜单动作行 | 「图层设置」「搜索设置」必须共用 `MapMenuActionRow`（图标 + 正文色文字 + chevron），不许各写一套 |
+| 边距 | 全屏地图页 16dp；详情页内嵌地图 12dp（地图区域小，属规范例外） |
+| 排列 | 圆钮纵向 8dp 间距；首页控件列从设置药丸下方 52dp 开始 |
 
-新增地图控件必须复用 `MapFloatingButton` / `MapPopupSurface`，不要各写透明度与动画。
+**互斥**：图层菜单、定位菜单、扫描菜单共用一个 `MapOverlayState`，同一时间只有一个；
+点另一个入口 = 关闭旧的、打开新的。扫描状态菜单与图层菜单同款卡片（252dp / 16dp 圆角 / 同一动画），
+内容按"分组标题 + 行 + 底部动作"组织。
 
 ### 10.2 指北（指南针）
 
@@ -408,7 +442,8 @@ droneReleaseKeyPassword=<口令>
 - 指针角度 = **屏幕上正北的方向角**（`MapCameraState.northAngle`：把地图中心与其「正北约 100 m 处」的点投影到屏幕后求夹角）。
   **不要用 `bearing` 取反**：腾讯 SDK 的 bearing 正负与 Google 式定义相反，取反会转反；投影法在任何旋转/倾斜下都正确。
   用最短路径插值（`tween(240)`），跨越 ±180° 不整圈回甩；
-- 点击 = 回正北；`setRotateGesturesEnabled(true)`、`setCompassEnabled(false)`（隐藏 SDK 自带指南针）。
+- 点击 = 回正北；`setRotateGesturesEnabled(true)`、`setCompassEnabled(false)`（隐藏 SDK 自带指南针）；
+- 容器复用 `MapChromeButtonContainer`（尺寸/描边/按压动画与其它圆钮一致；指针绘制除外）。
 
 ### 10.3 叠加图层通用规则（对将来所有图层生效）
 
@@ -438,5 +473,32 @@ droneReleaseKeyPassword=<口令>
 
 ### 10.6 演示数据
 
-演示模式的无人机来自 `MockData`，演示空域来自 `DemoAirspaceSource`（演示无人机附近画环，矢量渲染）；
+演示模式的无人机来自 `MockData`，演示空域来自 `DemoAirspaceSource`（演示无人机附近画"回"字环，矢量渲染）；
 两者都必须打「演示」标记，且**不得覆盖真实数据包**（该层已选包时不用演示数据）。
+
+演示环 = **4 条互不重叠的矩形带**（上/下/左/右），**不使用多边形洞、不画中心方块**；
+矢量绘制必须**同步 + 幂等**（数据源 `features()` 约定同步返回），切底图时清空重画——
+1.1.5 用"洞 + 异步协程"曾出现"中心块时有时无"（见 §9）。
+
+### 10.7 地图浮层与返回优先级
+
+- 三个入口（图层钮、定位钮、扫描药丸）都调用 `MapOverlayState.toggle(...)`，天然互斥、不会重叠；
+- 点地图空白 / 系统返回键：**先关闭浮层**（`BackHandler(enabled = overlay.open != NONE)`），再交给页面返回；
+- 菜单用 `Popup(focusable = false, dismissOnClickOutside = false, dismissOnBackPress = false)`：
+  点击可**穿透**到下层按钮（实现"点另一个按钮直接换菜单"，不会被"点外部只关闭"吃掉第一次点击）；
+- 关闭由页面里的**全屏点击遮罩**（位于地图之上、按钮之下）+ 返回键统一处理；
+- **路由切换**：Material **Shared Axis X**（Google 主流页面切换）——两个页面各平移 **30dp**、共 **300ms**；
+  旧页前 **100ms** 淡出，新页延迟 100ms 后用 **200ms** 淡入；方向由 `push`/`goBack` 写入 `navDirection`，
+  参数集中在 `AppMotion`（`NavShiftDp/NavSlideMs/NavFadeOutMs/NavFadeInMs/NavFadeInDelayMs`）。
+  **不要**改成整屏滑动（突兀）或纯 crossfade（发闷）；
+- **地图必须用 `TextureMapView`**（`TextureView`）而不是 `MapView`（`SurfaceView`）：
+  SurfaceView 由系统单独合成，整页转场时表现为「地图硬切、只有浮层在淡入淡出」；TextureView 才能参与整页 alpha。
+
+### 10.8 页面返回栈与复制
+
+- 导航 = 显式返回栈（`MainActivity.backStack`）：`push(route)` / `goBack()`；栈底 `"map"` 的返回交给系统退出 App；
+- **禁止**在页面里把"父页面"写死——从哪进就退回哪（首页→搜索设置→返回=首页；设置→搜索设置→返回=设置）；
+- 详情/全屏页的 `onBack`、`BackHandler` 一律调 `goBack()`；无人机 id 存在该条 `NavEntry` 里，**不再有全局 `selectedDroneId`**；
+- 详情页字段 = **点按复制**：整行 `clickable`（原生 ripple）+ Toast「xxx 复制成功」；
+  **不要用 `SelectionContainer`**（与 `verticalScroll` 组合会出现文字重影/错位，1.1.6 已移除）；
+  「基本信息」标题右侧提供「复制全部信息」（全部 19 个字段，含分组标题，逐行 `标签: 值`）。

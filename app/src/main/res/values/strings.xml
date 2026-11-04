@@ -24,6 +24,8 @@
     <string name="bt_disabled">系统蓝牙未开启</string>
     <string name="wifi_unavailable">Wi-Fi 未开启或不可用</string>
     <string name="scan_panel_solution">请前往「搜索设置」检查扫描开关、权限与设备能力</string>
+    <string name="scan_menu_title">扫描状态</string>
+    <string name="scan_mode_label">扫描模式</string>
     <string name="goto_search_settings">前往搜索设置</string>
     <string name="wifi_scanning">Wi-Fi 扫描中…</string>
     <string name="bluetooth_scanning">蓝牙扫描中…</string>
@@ -87,8 +89,8 @@
     <string name="nav_to_operator">导航到遥控站</string>
     <string name="operator_label">飞手</string>
     <string name="kv_basic_info">基本信息</string>
-    <string name="kv_motion">运动状态</string>
-    <string name="kv_operator">操控者</string>
+    <string name="kv_motion">航空器状态</string>
+    <string name="kv_operator">遥控端状态</string>
     <string name="kv_serial">序列号</string>
     <string name="kv_id_type">ID 类型</string>
     <string name="kv_proto_version">协议版本</string>
@@ -107,14 +109,15 @@
     <string name="kv_lng">经度</string>
     <string name="kv_distance">距离本机</string>
     <string name="kv_operator_id">操作员 ID</string>
-    <string name="kv_operator_pos">遥控站位置</string>
+    <string name="kv_operator_lat">遥控站纬度</string>
+    <string name="kv_operator_lng">遥控站经度</string>
 
     <!-- Settings -->
     <string name="settings_title">设置</string>
     <string name="search_settings">搜索设置</string>
     <string name="display_settings">显示设置</string>
     <string name="about_us">关于我们</string>
-    <string name="app_version">v1.1.5</string>
+    <string name="app_version">v1.1.6</string>
 
     <!-- 搜索设置（全部中文） -->
     <!-- 扫描模式：顶部滑块（手机直连 / 外置天线） -->
@@ -202,4 +205,7 @@
     <string name="github_repo">GitHub 仓库</string>
     <string name="about_developer">开发者：707GLobal</string>
     <string name="about_copyright">© 2026 707GLobal，保留所有权利</string>
+    <string name="kv_copied">%1$s 复制成功</string>
+    <string name="kv_copy_all">复制全部信息</string>
+    <string name="kv_copy_all_done">全部信息复制成功</string>
 </resources>

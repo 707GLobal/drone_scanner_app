@@ -3,21 +3,14 @@ package com.global_707.drone_scanner.ui.map
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -26,11 +19,12 @@ import androidx.compose.ui.unit.dp
 import com.global_707.drone_scanner.ui.theme.LocalDroneColors
 
 /**
- * 指南针悬浮按钮（地图软件通用样式）：红色指针指向**正北**，随地图旋转同步转动。
+ * 指南针悬浮按钮：红色指针指向**正北**，随地图旋转同步转动。
  *
- * - 指针角度 = 屏幕上「正北」的方向角（`MapCameraState.northAngle`，由投影算出，
- *   不依赖各 SDK 对 bearing 正负的不同定义，因此不会转反）；
- * - 用最短路径插值，跨越 ±180° 时不会整圈倒转；
+ * - 指针角度 = 屏幕上正北的方向角（`MapCameraState.northAngle`，由投影算出），
+ *   不依赖各 SDK 对 `bearing` 正负的不同定义，因此不会转反；
+ * - 用最短路径插值，跨越 ±180° 时不整圈回甩；
+ * - 外观复用 [MapChromeButtonContainer]（与图层/定位按钮同一套尺寸、透明度、描边、按压动画）；
  * - 点击 = 重置北向（由调用方处理）。
  */
 @Composable
@@ -41,12 +35,10 @@ fun CompassButton(
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalDroneColors.current
-    // 指针当前角度（不是裸角度，避免 +170°→-170° 时整圈回甩）
     var needleAngle by remember { mutableFloatStateOf(0f) }
 
     LaunchedEffect(northAngle) {
-        val target = northAngle
-        val delta = ((target - needleAngle + 540f) % 360f) - 180f
+        val delta = ((northAngle - needleAngle + 540f) % 360f) - 180f
         animate(
             initialValue = needleAngle,
             targetValue = needleAngle + delta,
@@ -54,14 +46,10 @@ fun CompassButton(
         ) { value, _ -> needleAngle = value }
     }
 
-    Box(
-        modifier = modifier
-            .size(44.dp)
-            .clip(CircleShape)
-            .background(colors.card.copy(alpha = 0.72f))
-            .border(1.dp, colors.border.copy(alpha = 0.4f), CircleShape)
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
+    MapChromeButtonContainer(
+        onClick = onClick,
+        modifier = modifier,
+        description = contentDescription,
     ) {
         Canvas(Modifier.size(24.dp)) {
             val center = Offset(size.width / 2f, size.height / 2f)

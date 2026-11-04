@@ -21,6 +21,11 @@ interface AirspaceSource {
     /** 读取一张瓦片（PNG 字节）；null = 该瓦片没有数据 */
     fun tile(z: Int, x: Int, y: Int): ByteArray?
 
-    /** 视口内的矢量要素（WGS-84）；栅格包不提供，返回空表即可 */
-    suspend fun features(viewport: GeoRect): List<AirspaceFeature> = emptyList()
+    /**
+     * 视口内的矢量要素（WGS-84）；栅格包不提供，返回空表即可。
+     *
+     * **必须同步返回**：矢量绘制是"清空再画"的原子过程，异步返回会让两次同步交错，
+     * 出现重复叠色/漏画（1.1.5 演示空域中心块显示不一致就是这么来的）。
+     */
+    fun features(viewport: GeoRect): List<AirspaceFeature> = emptyList()
 }

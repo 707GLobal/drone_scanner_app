@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.provider.Settings
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -63,6 +64,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.platform.LocalContext
@@ -84,8 +86,12 @@ import com.global_707.drone_scanner.ui.components.StatusDot
 import com.global_707.drone_scanner.ui.map.DroneMap
 import com.global_707.drone_scanner.ui.map.LocateTarget
 import com.global_707.drone_scanner.ui.map.MapBackendProvider
+import com.global_707.drone_scanner.ui.map.MapChromePill
 import com.global_707.drone_scanner.ui.map.MapControls
+import com.global_707.drone_scanner.ui.map.MapOverlay
+import com.global_707.drone_scanner.ui.map.MapPopupSurface
 import com.global_707.drone_scanner.ui.map.rememberLayerMenu
+import com.global_707.drone_scanner.ui.map.rememberMapOverlayState
 import com.global_707.drone_scanner.ui.theme.AppIcons
 import com.global_707.drone_scanner.ui.theme.DroneTypography
 import com.global_707.drone_scanner.ui.theme.LocalDroneColors
@@ -114,7 +120,8 @@ fun MapHomeScreen(
     val appContext = context.applicationContext
     // 图层菜单（底图单选 + 叠加图层开关）：三处地图页共用同一份组装逻辑
     val layerMenu = rememberLayerMenu(context, onOpenLayerSettings)
-    var scanPanelVisible by remember { mutableStateOf(false) }
+    // 地图浮层状态（图层菜单 / 定位菜单 / 扫描菜单互斥）
+    val overlay = rememberMapOverlayState()
     var permissionsGranted by remember { mutableStateOf(checkAllPermissions(context)) }
     val pendingFeatureHint = stringResource(R.string.map_feature_pending)
 
@@ -128,6 +135,9 @@ fun MapHomeScreen(
             ScannerController.markScanStopped()
         }
     }
+
+    // 返回键：先关闭地图浮层，再交给页面返回（主流地图 App 的一致行为）
+    BackHandler(enabled = overlay.open != MapOverlay.NONE) { overlay.close() }
 
     LaunchedEffect(Unit) {
         if (!permissionsGranted) {
@@ -174,10 +184,6 @@ fun MapHomeScreen(
         )
     }
 
-    DisposableEffect(Unit) {
-        onDispose { ScannerController.stop() }
-    }
-
     Box(
         Modifier
             .fillMaxSize()
@@ -196,20 +202,18 @@ fun MapHomeScreen(
             modifier = Modifier.fillMaxSize(),
         )
 
-        // 扫描面板展开时：点击地图其他区域关闭（不消费拖动，真实地图接入后不受影响）
-        if (scanPanelVisible) {
+        // 浮层打开时：全屏点击遮罩（地图之上、按钮之下；点其它按钮可直接切换菜单）
+        if (overlay.open != MapOverlay.NONE) {
             Box(
                 Modifier
                     .fillMaxSize()
-                    .pointerInput(Unit) {
-                        detectTapGestures { scanPanelVisible = false }
-                    },
+                    .pointerInput(Unit) { detectTapGestures { overlay.close() } },
             )
         }
 
         // 权限未授予提示
         if (!permissionsGranted) {
-            FrostedPill(
+            MapChromePill(
                 onClick = { permissionLauncher.launch(neededPermissions().toTypedArray()) },
                 modifier = Modifier
                     .align(Alignment.TopCenter)
@@ -224,7 +228,7 @@ fun MapHomeScreen(
         }
 
         // ---- 左上角：设置入口 + 地图悬浮控件 ----
-        FrostedPill(
+        MapChromePill(
             onClick = onOpenSettings,
             modifier = Modifier
                 .align(Alignment.TopStart)
@@ -239,6 +243,7 @@ fun MapHomeScreen(
         }
         MapControls(
             layers = layerMenu,
+            overlay = overlay,
             locateTargets = listOfNotNull(
                 // 定位到设备位置
                 LocateTarget(
@@ -273,50 +278,53 @@ fun MapHomeScreen(
                 .padding(start = 16.dp, top = 108.dp),
         )
 
-        // ---- 右上角：扫描状态按钮（固定位置、真实状态、不呼吸） ----
-        val scanState = ScannerController.scanState
+        // ---- 右上角：扫描状态药丸（与其它浮层同一套设计）+ 统一菜单 ----
+        var scanPillHeight by remember { mutableStateOf(0.dp) }
+        val density = LocalDensity.current
         val (statusText, statusColor) = scanStatusInfo(permissionsGranted)
-        FrostedPill(
-            onClick = { scanPanelVisible = !scanPanelVisible },
-            modifier = Modifier
+        Box(
+            Modifier
                 .align(Alignment.TopEnd)
-                .padding(end = 16.dp, top = 56.dp),
-        ) {
-            // 静态状态点（无脉冲动画）
-            Box(
-                Modifier
-                    .size(8.dp)
-                    .background(statusColor, CircleShape),
-            )
-            Text(
-                text = statusText,
-                style = DroneTypography.captionMedium,
-                color = colors.foreground,
-            )
-        }
-
-        // ---- 扫描状态面板：缩放 + 渐变动画，锚定按钮正下方，不遮挡其他内容 ----
-        AnimatedVisibility(
-            visible = scanPanelVisible,
-            enter = scaleIn(
-                initialScale = 0.85f,
-                transformOrigin = TransformOrigin(1f, 0f),
-            ) + fadeIn(animationSpec = androidx.compose.animation.core.tween(200)),
-            exit = scaleOut(
-                targetScale = 0.85f,
-                transformOrigin = TransformOrigin(1f, 0f),
-            ) + fadeOut(animationSpec = androidx.compose.animation.core.tween(150)),
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(end = 16.dp, top = 104.dp),
-        ) {
-            ScanStatusPanel(
-                permissionsGranted = permissionsGranted,
-                onRequestPermissions = {
-                    permissionLauncher.launch(neededPermissions().toTypedArray())
+                .padding(end = 16.dp, top = 56.dp)
+                .onSizeChanged {
+                    // 回调不是 @Composable，密度必须在组合上下文里先取好
+                    scanPillHeight = with(density) { it.height.toDp() }
                 },
-                onOpenSearchSettings = onOpenSearchSettings,
-            )
+        ) {
+            MapChromePill(onClick = { overlay.toggle(MapOverlay.SCAN) }) {
+                // 静态状态点（无脉冲动画）
+                Box(
+                    Modifier
+                        .size(8.dp)
+                        .background(statusColor, CircleShape),
+                )
+                Text(
+                    text = statusText,
+                    style = DroneTypography.captionMedium,
+                    color = colors.foreground,
+                )
+            }
+            if (overlay.isOpen(MapOverlay.SCAN)) {
+                MapPopupSurface(
+                    alignment = Alignment.TopEnd,
+                    offset = IntOffset(
+                        0,
+                        with(density) { (scanPillHeight + 8.dp).roundToPx() },
+                    ),
+                ) {
+                    ScanStatusMenu(
+                        permissionsGranted = permissionsGranted,
+                        onRequestPermissions = {
+                            overlay.close()
+                            permissionLauncher.launch(neededPermissions().toTypedArray())
+                        },
+                        onOpenSearchSettings = {
+                            overlay.close()
+                            onOpenSearchSettings()
+                        },
+                    )
+                }
+            }
         }
 
         // ---- 下层：可拖拽 Bottom Sheet ----
@@ -383,236 +391,6 @@ private fun SystemSwitchReminderDialog(
             }
         },
     )
-}
-
-/** 通道错误描述（蓝牙 / Wi-Fi 错误码独立映射） */
-@Composable
-private fun channelErrorText(isBluetooth: Boolean, errorCode: Int): String = when {
-    isBluetooth && errorCode == ScanState.BT_ERR_UNAVAILABLE -> stringResource(R.string.bt_unavailable)
-    isBluetooth && errorCode == ScanState.BT_ERR_DISABLED -> stringResource(R.string.bt_disabled)
-    !isBluetooth && errorCode == ScanState.WIFI_ERR_UNAVAILABLE -> stringResource(R.string.wifi_unavailable)
-    else -> stringResource(R.string.scan_failed_code, errorCode)
-}
-
-/** 扫描状态面板：真实状态 + 错误解决方案 */
-@Composable
-private fun ScanStatusPanel(
-    permissionsGranted: Boolean,
-    onRequestPermissions: () -> Unit,
-    onOpenSearchSettings: () -> Unit,
-) {
-    val colors = LocalDroneColors.current
-    val state = ScannerController.scanState
-
-    Column(
-        Modifier
-            .width(240.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(colors.card)
-            // 模式切换时面板高度变化走原生尺寸动画
-            .animateContentSize()
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-    ) {
-        // 权限不足提示
-        if (!permissionsGranted) {
-            Text(
-                text = stringResource(R.string.scan_status_perm),
-                style = DroneTypography.captionMedium,
-                color = colors.danger,
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = stringResource(R.string.scan_panel_solution),
-                style = DroneTypography.label,
-                color = colors.mutedForeground,
-            )
-            Spacer(Modifier.height(8.dp))
-            Row(
-                Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(colors.primary)
-                    .clickable(onClick = onRequestPermissions)
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = stringResource(R.string.permission_required),
-                    style = DroneTypography.label,
-                    color = colors.primaryForeground,
-                )
-            }
-            HorizontalDivider(
-                modifier = Modifier.padding(vertical = 10.dp),
-                thickness = 1.dp,
-                color = colors.border,
-            )
-        }
-
-        // 当前扫描模式标题
-        Text(
-            text = stringResource(
-                if (AppPrefs.scanMode == ScanMode.EXTERNAL) {
-                    R.string.scan_source_external
-                } else {
-                    R.string.scan_source_internal
-                },
-            ),
-            style = DroneTypography.captionMedium,
-            color = colors.foreground,
-        )
-        HorizontalDivider(
-            modifier = Modifier.padding(vertical = 10.dp),
-            thickness = 1.dp,
-            color = colors.border,
-        )
-
-        if (AppPrefs.scanMode == ScanMode.EXTERNAL) {
-            // 外置天线：相关选项内容预留，当前只显示连接状态
-            Row(
-                Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = stringResource(R.string.scan_channel_external),
-                    style = DroneTypography.captionMedium,
-                    color = colors.foreground,
-                    modifier = Modifier.weight(1f),
-                )
-                Text(
-                    text = stringResource(R.string.scan_external_not_connected),
-                    style = DroneTypography.label,
-                    color = colors.mutedForeground,
-                )
-            }
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = stringResource(R.string.scan_external_hint),
-                style = DroneTypography.label,
-                color = colors.mutedForeground,
-            )
-            Spacer(Modifier.height(10.dp))
-            GotoSearchSettingsButton(onClick = onOpenSearchSettings)
-        } else {
-            // Wi-Fi 通道
-            ChannelStatusRow(
-                icon = AppIcons.Wifi,
-                isBluetooth = false,
-                label = stringResource(R.string.scan_wifi),
-                enabled = AppPrefs.wifiScanEnabled,
-                scanning = state.wifiScanning,
-                errorCode = state.wifiErrorCode,
-            )
-            HorizontalDivider(
-                modifier = Modifier.padding(vertical = 10.dp),
-                thickness = 1.dp,
-                color = colors.border,
-            )
-            // 蓝牙通道
-            ChannelStatusRow(
-                icon = AppIcons.Bluetooth,
-                isBluetooth = true,
-                label = stringResource(R.string.scan_bluetooth),
-                enabled = AppPrefs.bluetoothScanEnabled,
-                scanning = state.bluetoothScanning,
-                errorCode = state.bluetoothErrorCode,
-            )
-
-            // 扫描异常时追加解决方案说明
-            if (state.hasError || !AppPrefs.wifiScanEnabled || !AppPrefs.bluetoothScanEnabled) {
-                HorizontalDivider(
-                    modifier = Modifier.padding(vertical = 10.dp),
-                    thickness = 1.dp,
-                    color = colors.border,
-                )
-                Text(
-                    text = stringResource(R.string.scan_panel_solution),
-                    style = DroneTypography.label,
-                    color = colors.mutedForeground,
-                )
-                Spacer(Modifier.height(8.dp))
-            }
-            Spacer(Modifier.height(10.dp))
-            GotoSearchSettingsButton(onClick = onOpenSearchSettings)
-        }
-    }
-}
-
-/** 「前往搜索设置」按钮（扫描状态面板内共用） */
-@Composable
-private fun GotoSearchSettingsButton(onClick: () -> Unit) {
-    val colors = LocalDroneColors.current
-    Row(
-        Modifier
-            .clip(RoundedCornerShape(8.dp))
-            .background(colors.primary)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = stringResource(R.string.goto_search_settings),
-            style = DroneTypography.label,
-            color = colors.primaryForeground,
-        )
-    }
-}
-
-/** 单个扫描通道状态行：图标 + 名称 + 状态（扫描中/已关闭/失败原因/未在扫描） */
-@Composable
-private fun ChannelStatusRow(
-    icon: ImageVector,
-    isBluetooth: Boolean,
-    label: String,
-    enabled: Boolean,
-    scanning: Boolean,
-    errorCode: Int?,
-) {
-    val colors = LocalDroneColors.current
-    Row(
-        Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = colors.foreground,
-            modifier = Modifier.size(16.dp),
-        )
-        Text(
-            text = label,
-            style = DroneTypography.captionMedium,
-            color = colors.foreground,
-            modifier = Modifier.weight(1f),
-        )
-        when {
-            !enabled -> Text(
-                text = stringResource(R.string.scan_channel_off),
-                style = DroneTypography.label,
-                color = colors.mutedForeground,
-            )
-
-            scanning -> Text(
-                text = stringResource(
-                    if (isBluetooth) R.string.bluetooth_scanning else R.string.wifi_scanning,
-                ),
-                style = DroneTypography.label,
-                color = colors.success,
-            )
-
-            errorCode != null -> Text(
-                text = channelErrorText(isBluetooth = isBluetooth, errorCode = errorCode),
-                style = DroneTypography.label,
-                color = colors.danger,
-            )
-
-            else -> Text(
-                text = stringResource(R.string.scan_channel_idle),
-                style = DroneTypography.label,
-                color = colors.mutedForeground,
-            )
-        }
-    }
 }
 
 /**

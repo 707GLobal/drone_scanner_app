@@ -101,4 +101,6 @@ data class Drone(
     /** 最后发现距今秒数 */
     val lastSeenSeconds: Int,
     val status: DroneStatus,
+    /** 原始信号强度（dBm，来自射频上报）；未知为 null。展示用，不要拿它做状态判定 */
+    val rssiDbm: Int? = null,
 )

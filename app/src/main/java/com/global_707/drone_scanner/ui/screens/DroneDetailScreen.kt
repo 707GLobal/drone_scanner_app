@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -25,6 +26,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -37,10 +39,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.activity.compose.BackHandler
 import com.global_707.drone_scanner.R
 import com.global_707.drone_scanner.data.AppPrefs
 import com.global_707.drone_scanner.data.Drone
@@ -48,7 +53,10 @@ import com.global_707.drone_scanner.data.ScannerController
 import com.global_707.drone_scanner.ui.map.DroneMap
 import com.global_707.drone_scanner.ui.map.LocateTarget
 import com.global_707.drone_scanner.ui.map.MapBackendProvider
+import com.global_707.drone_scanner.ui.map.MapChromeLabelPill
 import com.global_707.drone_scanner.ui.map.MapControls
+import com.global_707.drone_scanner.ui.map.MapOverlay
+import com.global_707.drone_scanner.ui.map.rememberMapOverlayState
 import com.global_707.drone_scanner.ui.map.rememberLayerMenu
 import com.global_707.drone_scanner.ui.theme.AppIcons
 import com.global_707.drone_scanner.ui.theme.DroneTypography
@@ -103,6 +111,10 @@ fun DroneDetailScreen(
     val colors = LocalDroneColors.current
     val context = LocalContext.current
     val layerMenu = rememberLayerMenu(context, onOpenLayerSettings)
+    val overlay = rememberMapOverlayState()
+
+    // 返回键：先关闭地图浮层，再走页面返回
+    BackHandler(enabled = overlay.open != MapOverlay.NONE) { overlay.close() }
     val pendingFeatureHint = stringResource(R.string.map_feature_pending)
     val operatorLabel = stringResource(R.string.operator_label)
     val locateDevice = stringResource(R.string.locate_to_device)
@@ -133,9 +145,19 @@ fun DroneDetailScreen(
                 modifier = Modifier.fillMaxSize(),
             )
 
+            // 浮层打开时：全屏点击遮罩（位于地图之上、控件之下，点其它按钮可穿透切换菜单）
+            if (overlay.open != MapOverlay.NONE) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .pointerInput(Unit) { detectTapGestures { overlay.close() } },
+                )
+            }
+
             // 地图悬浮控件（左上角）：定位按钮弹出菜单（设备/无人机/遥控站，图标按钮 + 动画）
             MapControls(
                 layers = layerMenu,
+                overlay = overlay,
                 locateTargets = listOfNotNull(
                     LocateTarget(
                         icon = AppIcons.Phone,
@@ -176,7 +198,7 @@ fun DroneDetailScreen(
             )
 
             // 全屏查看按钮（右上角）
-            MapOverlayButton(
+            MapChromeLabelPill(
                 icon = AppIcons.Fullscreen,
                 label = stringResource(R.string.map_enter_fullscreen),
                 onClick = onEnterFullscreen,
@@ -226,75 +248,86 @@ fun DroneDetailScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 12.dp),
         ) {
-            KeyValueSection(title = stringResource(R.string.kv_basic_info)) {
-                KeyValueRow(stringResource(R.string.kv_serial), drone.snCode ?: "—")
-                KeyValueRow(stringResource(R.string.kv_id_type), idTypeLabel(drone.idType))
-                KeyValueRow(stringResource(R.string.kv_proto_version), drone.protocolVersion?.toString() ?: "—")
-                KeyValueRow(stringResource(R.string.kv_signal), signalLabel(drone.signalStrength))
-                KeyValueRow(stringResource(R.string.kv_protocol), drone.protocol)
-                KeyValueRow(stringResource(R.string.kv_frequency), drone.frequency)
-                KeyValueRow(
-                    stringResource(R.string.kv_last_seen),
+            val basicRows = listOf(
+                stringResource(R.string.kv_serial) to (drone.snCode ?: "—"),
+                stringResource(R.string.kv_id_type) to idTypeLabel(drone.idType),
+                stringResource(R.string.kv_proto_version) to (drone.protocolVersion?.toString() ?: "—"),
+                stringResource(R.string.kv_signal) to
+                    (drone.rssiDbm?.let { "${it.coerceIn(-100, 0)} dBm" } ?: "—"),
+                stringResource(R.string.kv_protocol) to drone.protocol,
+                stringResource(R.string.kv_frequency) to drone.frequency,
+                stringResource(R.string.kv_last_seen) to
                     stringResource(R.string.time_ago_format, drone.lastSeenSeconds),
-                )
+            )
+            val motionRows = listOf(
+                stringResource(R.string.kv_speed_h) to speedValue(drone.speedMs),
+                stringResource(R.string.kv_speed_v) to speedValue(drone.verticalSpeedMs),
+                stringResource(R.string.kv_pressure_alt) to altitudeValue(drone.pressureAltitudeM),
+                stringResource(R.string.kv_geodetic_alt) to altitudeValue(drone.geodeticAltitudeM),
+                stringResource(R.string.kv_height_above) to altitudeValue(drone.heightAboveTakeoffM),
+                stringResource(R.string.kv_direction) to
+                    (drone.directionDeg?.let { "${formatNumber(it)}°" } ?: "—"),
+                stringResource(R.string.kv_timestamp) to
+                    (drone.ridTimestampSeconds?.let { String.format(Locale.US, "%.1f s", it) } ?: "—"),
+                stringResource(R.string.kv_lat) to
+                    (drone.droneLat?.let { String.format(Locale.US, "%.6f°", it) } ?: "—"),
+                stringResource(R.string.kv_lng) to
+                    (drone.droneLng?.let { String.format(Locale.US, "%.6f°", it) } ?: "—"),
+                stringResource(R.string.kv_distance) to
+                    (drone.distanceM?.let { "${formatNumber(it)} m" } ?: "—"),
+            )
+            val operatorRows = listOf(
+                stringResource(R.string.kv_operator_id) to (drone.operatorId ?: "—"),
+                // 与航空器经纬度一致：纬度、经度分成两行
+                stringResource(R.string.kv_operator_lat) to
+                    (drone.operatorLat?.let { String.format(Locale.US, "%.6f°", it) } ?: "—"),
+                stringResource(R.string.kv_operator_lng) to
+                    (drone.operatorLng?.let { String.format(Locale.US, "%.6f°", it) } ?: "—"),
+            )
+            val sections = listOf(
+                stringResource(R.string.kv_basic_info) to basicRows,
+                stringResource(R.string.kv_motion) to motionRows,
+                stringResource(R.string.kv_operator) to operatorRows,
+            )
+            val clipboard = LocalClipboardManager.current
+            fun copyToClipboard(text: String, toast: String) {
+                clipboard.setText(AnnotatedString(text))
+                Toast.makeText(context, toast, Toast.LENGTH_SHORT).show()
             }
-            KeyValueSection(title = stringResource(R.string.kv_motion)) {
-                KeyValueRow(stringResource(R.string.kv_speed_h), speedValue(drone.speedMs))
-                KeyValueRow(stringResource(R.string.kv_speed_v), speedValue(drone.verticalSpeedMs))
-                KeyValueRow(stringResource(R.string.kv_pressure_alt), altitudeValue(drone.pressureAltitudeM))
-                KeyValueRow(stringResource(R.string.kv_geodetic_alt), altitudeValue(drone.geodeticAltitudeM))
-                KeyValueRow(stringResource(R.string.kv_height_above), altitudeValue(drone.heightAboveTakeoffM))
-                KeyValueRow(stringResource(R.string.kv_direction), drone.directionDeg?.let { "${formatNumber(it)}°" } ?: "—")
-                KeyValueRow(
-                    stringResource(R.string.kv_timestamp),
-                    drone.ridTimestampSeconds?.let { String.format(Locale.US, "%.1f s", it) } ?: "—",
-                )
-                KeyValueRow(stringResource(R.string.kv_lat), drone.droneLat?.let { String.format(Locale.US, "%.6f°", it) } ?: "—")
-                KeyValueRow(stringResource(R.string.kv_lng), drone.droneLng?.let { String.format(Locale.US, "%.6f°", it) } ?: "—")
-                KeyValueRow(stringResource(R.string.kv_distance), drone.distanceM?.let { "${formatNumber(it)} m" } ?: "—")
+
+            KeyValueSection(
+                title = sections[0].first,
+                action = {
+                    CopyAllButton(
+                        onClick = {
+                            copyToClipboard(
+                                formatSections(sections),
+                                context.getString(R.string.kv_copy_all_done),
+                            )
+                        },
+                    )
+                },
+            ) {
+                basicRows.forEach { (label, value) -> KeyValueRow(label, value) }
             }
-            KeyValueSection(title = stringResource(R.string.kv_operator)) {
-                KeyValueRow(stringResource(R.string.kv_operator_id), drone.operatorId ?: "—")
-                val operatorPos = if (drone.operatorLat != null && drone.operatorLng != null) {
-                    String.format(Locale.US, "%.6f°, %.6f°", drone.operatorLat, drone.operatorLng)
-                } else {
-                    "—"
-                }
-                KeyValueRow(stringResource(R.string.kv_operator_pos), operatorPos)
+            KeyValueSection(title = sections[1].first) {
+                motionRows.forEach { (label, value) -> KeyValueRow(label, value) }
+            }
+            KeyValueSection(title = sections[2].first) {
+                operatorRows.forEach { (label, value) -> KeyValueRow(label, value) }
             }
         }
     }
 }
 
-/** 地图上方小型覆盖按钮 */
+/** 地图底部导航按钮（实心主色，禁用态灰） */
 @Composable
-private fun MapOverlayButton(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {    val colors = LocalDroneColors.current
-    Row(
-        modifier = modifier
-            .clip(RoundedCornerShape(50))
-            .background(colors.card.copy(alpha = 0.9f))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = label,
-            tint = colors.primary,
-            modifier = Modifier.size(18.dp),
-        )
-        Text(
-            text = label,
-            style = DroneTypography.captionMedium,
-            color = colors.foreground,
-        )
-    }
-}
-
-/** 底部导航按钮 */
-@Composable
-private fun NavigationButton(label: String, enabled: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+private fun NavigationButton(
+    label: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val colors = LocalDroneColors.current
     Row(
         modifier = modifier
@@ -322,17 +355,30 @@ private fun NavigationButton(label: String, enabled: Boolean, onClick: () -> Uni
     }
 }
 
-/** 键值对分组段落 */
+/** 键值对分组段落：标题行（可带右侧动作）+ 卡片内容 */
 @Composable
-private fun KeyValueSection(title: String, content: @Composable ColumnScope.() -> Unit) {
+private fun KeyValueSection(
+    title: String,
+    action: (@Composable () -> Unit)? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
     val colors = LocalDroneColors.current
     Column(Modifier.fillMaxWidth()) {
-        Text(
-            text = title,
-            style = DroneTypography.pageTitle.copy(fontWeight = FontWeight.SemiBold),
-            color = colors.foreground,
-            modifier = Modifier.padding(vertical = 10.dp),
-        )
+        Row(
+            // 固定行高：三个分组标题高度一致，不受右侧按钮高度影响
+            Modifier
+                .fillMaxWidth()
+                .height(36.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = title,
+                style = DroneTypography.pageTitle.copy(fontWeight = FontWeight.SemiBold),
+                color = colors.foreground,
+                modifier = Modifier.weight(1f),
+            )
+            action?.invoke()
+        }
         Column(
             Modifier
                 .fillMaxWidth()
@@ -342,19 +388,50 @@ private fun KeyValueSection(title: String, content: @Composable ColumnScope.() -
         ) {
             content()
         }
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(20.dp))
     }
 }
 
-/** 键值对行：标签（左） + 值（右，等宽字体） */
+/** 「复制全部信息」按钮（与页面其它按钮同一套 M3 点按反馈） */
+@Composable
+private fun CopyAllButton(onClick: () -> Unit) {
+    val colors = LocalDroneColors.current
+    TextButton(
+        onClick = onClick,
+        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+        modifier = Modifier.height(28.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.kv_copy_all),
+            style = DroneTypography.label,
+            color = colors.primary,
+        )
+    }
+}
+
+/**
+ * 键值对行：标签（左）+ 值（右，等宽字体）。
+ * **点击整行即复制值**（原生 ripple + Toast「xxx 复制成功」），不再依赖长按选择。
+ */
 @Composable
 private fun KeyValueRow(label: String, value: String) {
     val colors = LocalDroneColors.current
+    val clipboard = LocalClipboardManager.current
+    val context = LocalContext.current
     Column {
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(vertical = 10.dp),
+                .clip(RoundedCornerShape(12.dp))
+                .clickable {
+                    clipboard.setText(AnnotatedString(value))
+                    Toast.makeText(
+                        context,
+                        context.getString(R.string.kv_copied, label),
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+                .padding(horizontal = 6.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
@@ -373,6 +450,20 @@ private fun KeyValueRow(label: String, value: String) {
     }
 }
 
+/** 全部字段文本（分组标题 + 每行「标签: 值」，组间空行） */
+private fun formatSections(sections: List<Pair<String, List<Pair<String, String>>>>): String =
+    sections.joinToString("\n\n") { (title, rows) ->
+        buildString {
+            append(title)
+            rows.forEach { (label, value) ->
+                append('\n')
+                append(label)
+                append(": ")
+                append(value)
+            }
+        }
+    }
+
 /** ID 类型中文映射（ASTM F3411 Basic ID） */
 private fun idTypeLabel(idType: Int?): String = when (idType) {
     1 -> "序列号"
@@ -381,14 +472,6 @@ private fun idTypeLabel(idType: Int?): String = when (idType) {
     4 -> "特定会话 ID"
     5 -> "注册号"
     else -> "—"
-}
-
-/** 信号强度 0..4 → 文字 */
-private fun signalLabel(level: Int): String = when {
-    level >= 4 -> "强"
-    level >= 3 -> "中"
-    level >= 1 -> "弱"
-    else -> "无信号"
 }
 
 private fun speedValue(v: Float?): String = v?.let { "${formatNumber(it)} m/s" } ?: "—"
@@ -406,6 +489,10 @@ fun FullscreenMapScreen(
     val colors = LocalDroneColors.current
     val context = LocalContext.current
     val layerMenu = rememberLayerMenu(context, onOpenLayerSettings)
+    val overlay = rememberMapOverlayState()
+
+    // 返回键：先关闭地图浮层，再走页面返回
+    BackHandler(enabled = overlay.open != MapOverlay.NONE) { overlay.close() }
     val pendingFeatureHint = stringResource(R.string.map_feature_pending)
     val locateDevice = stringResource(R.string.locate_to_device)
     val locateDrone = stringResource(R.string.locate_to_drone)
@@ -447,8 +534,19 @@ fun FullscreenMapScreen(
                 showLabels = true,
                 modifier = Modifier.fillMaxSize(),
             )
+
+            // 浮层打开时：全屏点击遮罩（位于地图之上、控件之下，点其它按钮可穿透切换菜单）
+            if (overlay.open != MapOverlay.NONE) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .pointerInput(Unit) { detectTapGestures { overlay.close() } },
+                )
+            }
+
             MapControls(
                 layers = layerMenu,
+                overlay = overlay,
                 locateTargets = listOfNotNull(
                     LocateTarget(
                         icon = AppIcons.Phone,

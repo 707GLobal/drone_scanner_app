@@ -17,9 +17,6 @@ import com.tencent.tencentmap.mapsdk.maps.model.Polyline
 import com.tencent.tencentmap.mapsdk.maps.model.PolylineOptions
 import com.tencent.tencentmap.mapsdk.maps.model.TileOverlay
 import com.tencent.tencentmap.mapsdk.maps.model.TileOverlayOptions
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.launch
 
 /**
  * 空域叠加层的地图侧宿主（**唯一接触腾讯地图 API 的空域代码**）。
@@ -32,22 +29,23 @@ import kotlinx.coroutines.launch
  *  - 相机监听**不在这里注册**：腾讯 `setOnCameraChangeListener` 是单 setter，
  *    由 `TencentMapBackend` 统一注册后分发（见 `MapCameraState`）。
  *
+ * 绘制是**同步 + 幂等**的（数据源 `features()` 约定同步返回）：
+ * 一次 `sync()` 内要么整层重画，要么什么都不做，不会出现"两次绘制交错 → 中心块时有时无"。
+ *
  * 绝不调用 `map.clear()`：无人机标记由 `TencentMapBackend` 自己逐个移除，两者互不干扰。
  */
-class TencentAirspaceLayer(
-    private val context: Context,
-    private val scope: CoroutineScope,
-) {
+class TencentAirspaceLayer(private val context: Context) {
 
     private var map: TencentMap? = null
     private val tileOverlays = mutableMapOf<String, TileOverlay>()
     private val appliedKeys = mutableMapOf<String, String>()
     private val polygons = mutableMapOf<String, MutableList<Polygon>>()
     private val polylines = mutableMapOf<String, MutableList<Polyline>>()
-    private val vectorKeys = mutableMapOf<String, String>()
-    private var vectorJob: Job? = null
 
-    /** 上一次同步时的底图类型：切换底图后强制重建瓦片层（部分 SDK 版本会清空覆盖物） */
+    /** 已绘制矢量的数据指纹（只有它变化时才重画，避免重复叠色） */
+    private val renderedVectorKeys = mutableMapOf<String, String>()
+
+    /** 上一次同步时的底图类型：切换底图后强制重建瓦片层与矢量层 */
     private var lastSatellite: Boolean? = null
 
     fun attach(target: TencentMap) {
@@ -58,15 +56,19 @@ class TencentAirspaceLayer(
 
     /**
      * 按"当前应显示的图层集合 + 每层的数据"同步覆盖物。
-     * 由 Compose 在（地图就绪 / 开关变化 / 选包变化 / 演示模式变化）时调用。
+     * 由 Compose 在（地图就绪 / 开关变化 / 选包变化 / 演示模式变化 / 底图切换）时调用。
      */
     fun sync(visibleLayers: Set<String>, catalogs: Map<String, AirspaceCatalog>, satellite: Boolean) {
         val target = map ?: return
 
-        if (lastSatellite != null && lastSatellite != satellite) {
+        val baseMapChanged = lastSatellite != null && lastSatellite != satellite
+        if (baseMapChanged) {
+            // 切底图后部分 SDK 版本会清掉覆盖物，这里主动重建，避免"图层闪没/残影"
             tileOverlays.values.forEach { runCatching { it.remove() } }
             tileOverlays.clear()
             appliedKeys.clear()
+            polygons.keys.toList().forEach { clearVectorHandles(it) }
+            renderedVectorKeys.clear()
         }
         lastSatellite = satellite
 
@@ -78,10 +80,13 @@ class TencentAirspaceLayer(
             }
         }
         (polygons.keys + polylines.keys).toSet().forEach { layerId ->
-            if (layerId !in visibleLayers || catalogs[layerId] == null) clearVectors(layerId)
+            if (layerId !in visibleLayers || catalogs[layerId] == null) {
+                clearVectorHandles(layerId)
+                renderedVectorKeys.remove(layerId)
+            }
         }
 
-        // 2) 创建/更新需要显示的图层
+        // 2) 创建/更新需要显示的图层（同步完成，不并发）
         visibleLayers.forEach { layerId ->
             val catalog = catalogs[layerId] ?: return@forEach
             if (catalog.isDemo) {
@@ -93,14 +98,12 @@ class TencentAirspaceLayer(
     }
 
     fun release() {
-        vectorJob?.cancel()
-        vectorJob = null
         tileOverlays.values.forEach { runCatching { it.remove() } }
         tileOverlays.clear()
         appliedKeys.clear()
-        polygons.keys.toList().forEach { clearVectors(it) }
+        polygons.keys.toList().forEach { clearVectorHandles(it) }
         polylines.clear()
-        vectorKeys.clear()
+        renderedVectorKeys.clear()
         map = null
     }
 
@@ -137,15 +140,19 @@ class TencentAirspaceLayer(
     // ---------- 矢量（演示数据 / 将来的矢量包） ----------
 
     private fun ensureDemoVector(target: TencentMap, catalog: AirspaceCatalog) {
-        val key = "${catalog.packName}|${catalog.layerId}"
-        if (vectorKeys[catalog.layerId] == key && polygons.containsKey(catalog.layerId)) return
+        val key = "${catalog.packId}|${catalog.layerId}"
+        if (renderedVectorKeys[catalog.layerId] == key && polygons.containsKey(catalog.layerId)) return
         val source = AirspaceRepository.source(catalog.layerId) ?: return
-        vectorJob?.cancel()
-        vectorJob = scope.launch {
-            val features = runCatching { source.features(WORLD) }.getOrDefault(emptyList())
-            drawVectors(target, catalog, features)
-            vectorKeys[catalog.layerId] = key
-        }
+
+        // 先清后画，且同步完成：即使 sync 被连续调用，也不会出现两套多边形叠加
+        clearVectorHandles(catalog.layerId)
+        val features = runCatching { source.features(WORLD) }.getOrDefault(emptyList())
+        drawVectors(target, catalog, features)
+        renderedVectorKeys[catalog.layerId] = key
+        AppLogger.i(
+            "Airspace",
+            "vector_drawn layer=${catalog.layerId} features=${features.size}",
+        )
     }
 
     private fun drawVectors(
@@ -153,7 +160,6 @@ class TencentAirspaceLayer(
         catalog: AirspaceCatalog,
         features: List<AirspaceFeature>,
     ) {
-        clearVectors(catalog.layerId)
         val drawnPolygons = mutableListOf<Polygon>()
         val drawnPolylines = mutableListOf<Polyline>()
         features.forEach { feature ->
@@ -191,10 +197,10 @@ class TencentAirspaceLayer(
         polylines[catalog.layerId] = drawnPolylines
     }
 
-    private fun clearVectors(layerId: String) {
+    /** 只移除覆盖物句柄，不动"数据指纹"（指纹由调用方维护） */
+    private fun clearVectorHandles(layerId: String) {
         polygons.remove(layerId)?.forEach { runCatching { it.remove() } }
         polylines.remove(layerId)?.forEach { runCatching { it.remove() } }
-        vectorKeys.remove(layerId)
     }
 
     /** WGS-84 → GCJ-02：空域坐标入图的**唯一**转换点 */
